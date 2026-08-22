@@ -46,8 +46,8 @@
         "description": "renderer_template",
         "type": "string",
         "hint": "渲染模板",
-        "options": ["template_1", "template_2", "simple"],
-        "default": "template_2"
+        "options": ["simple", "wakaba_dark", "wakaba_light"],
+        "default": "wakaba_dark"
     },
     "node": {
         "description": "node",
@@ -65,6 +65,18 @@
         "description": "enable_parse_BV",
         "type": "bool",
         "hint": "是否解析B站视频链接",
+        "default": true
+    },
+    "enable_video_image": {
+        "description": "enable_video_image",
+        "type": "bool",
+        "hint": "是否将自然语言搜索的视频列表渲染为图片。关闭后返回纯文本（单个视频仍返回图文）。",
+        "default": true
+    },
+    "enable_bangumi_image": {
+        "description": "enable_bangumi_image",
+        "type": "bool",
+        "hint": "是否将自然语言搜索的番剧列表渲染为图片。关闭后返回纯文本（单个番剧仍返回图文）。",
         "default": true
     },
     "dynamic_limit": {

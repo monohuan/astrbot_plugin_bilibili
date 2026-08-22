@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=630">
+<meta name="viewport" content="width=640">
 <title>Bilibili Dynamic Card - Modern</title>
 <style>
     :root {
@@ -26,7 +26,6 @@
         display: flex;
         justify-content: flex-start;
         align-items: flex-start;
-        min-height: 100vh;
         box-sizing: border-box;
     }
 
@@ -125,6 +124,62 @@
         margin-left: 16px;
     }
 
+    .authors-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 14px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .author {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .author-avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 1px solid #f0f0f0;
+    }
+
+    .author-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-main);
+    }
+
+    .author-details {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .author-uid {
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+        margin-top: 1px;
+    }
+
+    .header-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        margin-left: 16px;
+    }
+
+    .timestamp {
+        font-size: 12px;
+        color: var(--text-secondary);
+        flex-shrink: 0;
+    }
+
     /* Content Section */
     .card-content {
         padding: 0 24px 20px;
@@ -157,6 +212,42 @@
         color: var(--text-main);
         margin-bottom: 8px;
         line-height: 1.4;
+    }
+
+    .desc-text {
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text-main);
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-bottom: 10px;
+    }
+
+    .stats-row {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+    }
+
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .stat-icon {
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+    }
+
+    .online-line {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
     }
 
     /* Image Grid */
@@ -262,6 +353,29 @@
 <div class="card">
     <!-- Header -->
     <div class="card-header">
+        {% if authors %}
+        <div class="authors-row">
+            {% for a in authors %}
+            <div class="author">
+                {% if a.face %}
+                <img src="{{ a.face }}" class="author-avatar" alt="avatar">
+                {% endif %}
+                <div class="author-details">
+                    <span class="author-name">{{ a.name }}</span>
+                    {% if a.uid %}<span class="author-uid">UID: {{ a.uid }}</span>{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="header-meta">
+            {% if label %}
+            <span class="dynamic-label">{{ label }}</span>
+            {% endif %}
+            {% if pub_time %}
+            <span class="timestamp">{{ pub_time }}</span>
+            {% endif %}
+        </div>
+        {% else %}
         <div class="user-info">
             <div class="avatar-wrapper">
                 <img src="{{ avatar }}" class="avatar" alt="avatar">
@@ -272,18 +386,25 @@
             <div class="user-details">
                 <div class="username">{{ name | default('AstrBot') }}</div>
                 <div class="meta-info">
+                    {% if label %}
+                    <span class="dynamic-label">{{ label }}</span>
+                    {% else %}
                     <span class="dynamic-label">
                         {% if type == "DYNAMIC_TYPE_AV" %}投稿视频
                         {% elif type == "DYNAMIC_TYPE_Article" %}专栏文章
                         {% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态
                         {% else %}动态更新{% endif %}
                     </span>
-                    <!-- <span>2小时前</span> -->
+                    {% endif %}
+                    {% if pub_time %}
+                    <span class="timestamp">{{ pub_time }}</span>
+                    {% endif %}
                 </div>
             </div>
         </div>
         {% if qrcode %}
         <img src="{{ qrcode }}" class="qrcode" alt="QRCode">
+        {% endif %}
         {% endif %}
     </div>
 
@@ -291,6 +412,31 @@
     <div class="card-content">
         {% if title and type != "DYNAMIC_TYPE_FORWARD" %}
         <div class="content-title">{{ title }}</div>
+        {% endif %}
+
+        {% if desc %}
+        <div class="desc-text">{{ desc }}</div>
+        {% endif %}
+
+        {% if stat_view or stat_like or stat_coin %}
+        <div class="stats-row">
+            <span class="stat-item">
+                <svg class="stat-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72c0 .9.98 1.45 1.75.98l10.72-6.86a1.16 1.16 0 0 0 0-1.96L9.75 4.16A1.16 1.16 0 0 0 8 5.14z"/></svg>
+                <span class="stat-value">{{ stat_view }}</span>
+            </span>
+            <span class="stat-item">
+                <svg class="stat-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h4V9H1v12zM23 10c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+                <span class="stat-value">{{ stat_like }}</span>
+            </span>
+            <span class="stat-item">
+                <svg class="stat-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="12" y="16.4" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">B</text></svg>
+                <span class="stat-value">{{ stat_coin }}</span>
+            </span>
+        </div>
+        {% endif %}
+
+        {% if online %}
+        <div class="online-line">总共 {{ online }} 人正在观看</div>
         {% endif %}
 
         <div class="text-content">{{ text | default('') | safe }}</div>

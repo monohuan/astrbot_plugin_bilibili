@@ -16,7 +16,7 @@ from astrbot.core.agent.message import (
 )
 
 from ..bili_client import BiliClient
-from ..core.constant import BANNER_PATH, LOGO_PATH
+from ..core.constant import BANNER_PATH
 from ..core.data_manager import DataManager
 from ..core.models import DynamicParseResult, RenderPayload, SubscriptionRecord
 from ..core.utils import (
@@ -685,14 +685,12 @@ class DynamicListener:
         img_path = await self.renderer.render_dynamic(payload)
         if img_path:
             platform_name = self._resolve_platform_name(sub_user)
-            url = payload.url
             if is_height_valid(img_path, platform_name):
                 ls = [Image.fromFileSystem(img_path)]
             else:
                 timestamp = int(time.time())
                 filename = f"bilibili_dynamic_{timestamp}.jpg"
                 ls = [File(file=img_path, name=filename)]
-            ls.append(Plain(f"\n{url}"))
             self._cache_render(dyn_id, ls, send_node_flag)
             chain_to_send = self._add_at_components(
                 list(ls), sub_data, permit_atall=permit_atall
@@ -844,8 +842,8 @@ class DynamicListener:
         link = f"https://live.bilibili.com/{room_id}"
         return RenderPayload(
             banner=image_to_base64(BANNER_PATH),
-            name="AstrBot",
-            avatar=image_to_base64(LOGO_PATH),
+            name=str(live_room.get("uname", "") or ""),
+            avatar=str(live_room.get("face", "") or ""),
             title=str(live_room.get("title", "Unknown") or "Unknown"),
             url=link,
             qrcode=create_qrcode(link),
@@ -873,17 +871,11 @@ class DynamicListener:
         if img_path:
             platform_name = self._resolve_platform_name(sub_user)
             if is_height_valid(img_path, platform_name):
-                image_chain = [
-                    Image.fromFileSystem(img_path),
-                    Plain(f"\n{payload.url}"),
-                ]
+                image_chain = [Image.fromFileSystem(img_path)]
             else:
                 timestamp = int(time.time())
                 filename = f"bilibili_live_{timestamp}.jpg"
-                image_chain = [
-                    File(file=img_path, name=filename),
-                    Plain(f"\n{payload.url}"),
-                ]
+                image_chain = [File(file=img_path, name=filename)]
             if not is_offline:
                 image_chain = self._add_at_components(
                     image_chain, sub_data, is_live=True, permit_atall=permit_atall

@@ -2,9 +2,9 @@ from datetime import date
 from typing import Any, Optional
 
 from astrbot.api import FunctionTool
+from astrbot.api.event import MessageEventResult
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
-from mcp.types import CallToolResult
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
@@ -175,8 +175,68 @@ def _format_subject_list(title: str, subjects: list[dict[str, Any]]) -> str:
     for idx, subject in enumerate(subjects, start=1):
         lines.append(_format_subject_line(idx, subject))
         lines.append("")
-    lines.append("请分点，贴心地回答。不要输出 markdown 格式。")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()
+
+
+def _normalize_image_url(raw: str) -> str:
+    if not raw.strip():
+        return ""
+    url = raw.strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return url
+
+
+def _subject_cover(subject: dict[str, Any]) -> str:
+    images = subject.get("images")
+    if not isinstance(images, dict):
+        return ""
+    for key in ("large", "common", "medium", "small", "grid"):
+        url = images.get(key)
+        if isinstance(url, str) and url.strip():
+            return _normalize_image_url(url)
+    return ""
+
+
+def _to_subject_dict(subject: dict[str, Any]) -> dict[str, str]:
+    title = subject.get("name_cn") or subject.get("name") or "未知条目"
+    score = _extract_score(subject)
+    rank = _extract_rank(subject)
+    date_value = subject.get("date") or "未知"
+    return {
+        "title": str(title),
+        "score": f"{score:.1f}" if score is not None else "暂无",
+        "rank": f"#{rank}" if rank is not None else "暂无",
+        "date": str(date_value),
+        "cover": _subject_cover(subject),
+    }
+
+
+def _format_single_subject(subject: dict[str, Any]) -> str:
+    title = subject.get("name_cn") or subject.get("name") or "未知条目"
+    sid = subject.get("id", "未知ID")
+    score = _extract_score(subject)
+    rank = _extract_rank(subject)
+    date_value = subject.get("date") or "未知"
+    score_text = f"{score:.1f}" if score is not None else "暂无"
+    rank_text = f"#{rank}" if rank is not None else "暂无"
+    return (
+        f"《{title}》\n"
+        f"评分：{score_text} | 排名：{rank_text}\n"
+        f"日期：{date_value}\n"
+        f"链接：https://bgm.tv/subject/{sid}"
+    )
+
+
+def _build_single_subject_result(subject: dict[str, Any]) -> MessageEventResult:
+    result = MessageEventResult()
+    cover = _subject_cover(subject)
+    if cover:
+        result.url_image(cover)
+    result.message(_format_single_subject(subject))
+    return result
 
 
 def _has_non_empty_tags(filter_payload: dict[str, Any]) -> bool:
@@ -213,9 +273,11 @@ class BgmAdvancedSubjectSearchTool(FunctionTool):
     description: str = (
         "当用户要在 ACG 领域中按关键词+筛选条件检索时调用。"
         "适用于按年份、标签、评分、排名、类型等条件找作品。"
+        "若用户只要一个条目（如“给我找一个/推荐一个 XX”），把 limit 设为 1；要列表则设 5 左右。"
     )
     token: str = ""
     user_agent: str = DEFAULT_BANGUMI_USER_AGENT
+    renderer: Any = None
     parameters: dict = Field(default_factory=build_advanced_parameters_schema)
 
     async def call(
@@ -226,7 +288,7 @@ class BgmAdvancedSubjectSearchTool(FunctionTool):
         sort: str = "match",
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
-    ) -> str | CallToolResult:
+    ) -> MessageEventResult | str:
         _ = context
         client = BangumiApiClient(token=self.token, user_agent=self.user_agent)
         search_filters = filters if isinstance(filters, dict) else {}
@@ -253,6 +315,28 @@ class BgmAdvancedSubjectSearchTool(FunctionTool):
             )
         if not subjects:
             return "未检索到符合条件的条目。请调整关键词或筛选条件后重试。"
+
+        if normalized_limit == 1:
+            return _build_single_subject_result(subjects[0])
+
+        list_title = (
+            f"「{normalized_keyword}」番剧搜索结果"
+            if normalized_keyword
+            else "番剧搜索结果"
+        )
+        img_path = None
+        if self.renderer is not None:
+            try:
+                subject_dicts = [_to_subject_dict(s) for s in subjects]
+                img_path = await self.renderer.render_subject_list(
+                    subject_dicts, title=list_title
+                )
+            except Exception:
+                img_path = None
+
+        if img_path:
+            return MessageEventResult().file_image(img_path)
+
         return _format_subject_list("高级条目搜索结果", subjects)
 
 
@@ -262,9 +346,11 @@ class BgmRecommendHotSubjectsTool(FunctionTool):
     description: str = (
         "当用户想看近期热门/热度榜/最近值得看的 ACG 条目时调用。"
         "仅用于热门推荐，不用于关键词精确检索。"
+        "若用户只要一个条目，把 limit 设为 1；要列表则设 5 左右。"
     )
     token: str = ""
     user_agent: str = DEFAULT_BANGUMI_USER_AGENT
+    renderer: Any = None
     parameters: dict = Field(
         default_factory=lambda: build_recent_hot_parameters_schema(
             min_recent_months=MIN_RECENT_MONTHS
@@ -278,7 +364,7 @@ class BgmRecommendHotSubjectsTool(FunctionTool):
         filters: Optional[dict[str, Any]] = None,
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
-    ) -> str | CallToolResult:
+    ) -> MessageEventResult | str:
         _ = context
         client = BangumiApiClient(token=self.token, user_agent=self.user_agent)
         normalized_months = _normalize_recent_months(months)
@@ -299,6 +385,24 @@ class BgmRecommendHotSubjectsTool(FunctionTool):
         )
         if not subjects:
             return "未找到符合条件的近期热门条目。可放宽筛选或扩大 months。"
+
+        if normalized_limit == 1:
+            return _build_single_subject_result(subjects[0])
+
+        list_title = f"近期热门番剧（近 {normalized_months} 个月）"
+        img_path = None
+        if self.renderer is not None:
+            try:
+                subject_dicts = [_to_subject_dict(s) for s in subjects]
+                img_path = await self.renderer.render_subject_list(
+                    subject_dicts, title=list_title
+                )
+            except Exception:
+                img_path = None
+
+        if img_path:
+            return MessageEventResult().file_image(img_path)
+
         return _format_subject_list(
             f"近期热门条目（近 {normalized_months} 个月，按热度）", subjects
         )

@@ -17,7 +17,7 @@ from astrbot.api.event.filter import (
     permission_type,
     regex,
 )
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import File, Image
 from astrbot.core.star.filter.command import GreedyStr
 from bilibili_api import login_v2
 
@@ -29,10 +29,11 @@ from .core.constant import (
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
     LIVE_ATALL_OPTION,
-    LOGO_PATH,
     RECENT_DYNAMIC_CACHE,
     RECONNECT_SILENT_PADDING_SECS,
     RECONNECT_SILENT_THRESHOLD_SECS,
+    SUB_LIST_TEMPLATE_PATH,
+    SUB_SUCCESS_TEMPLATE_PATH,
     UNAT_SUB_OPTION,
     VALID_FILTER_TYPES,
     VALID_SUB_OPTIONS,
@@ -40,7 +41,7 @@ from .core.constant import (
 )
 from .core.data_manager import DataManager
 from .core.models import RenderPayload, SubscriptionRecord
-from .core.utils import create_qrcode, image_to_base64, is_valid_umo
+from .core.utils import is_height_valid, is_valid_umo
 from .services.dispatcher import SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
 from .services.renderer import Renderer
@@ -65,6 +66,9 @@ class Main(Star):
         self.bangumi_token = (self.cfg.get("bangumi_token", "") or "").strip()
         # 读取样式配置
         self.style = self.cfg.get("renderer_template", DEFAULT_TEMPLATE)
+        # 自然语言搜索（视频/番剧）列表是否渲染为图片
+        self.enable_video_image = self.cfg.get("enable_video_image", True)
+        self.enable_bangumi_image = self.cfg.get("enable_bangumi_image", True)
 
         self.data_manager = DataManager(
             recent_dynamic_cache=self.cfg.get(
@@ -102,18 +106,23 @@ class Main(Star):
             bili_client=self.bili_client,
             parse_dynamics=self.dynamic_listener._parse_and_filter_dynamics,
         )
+        video_renderer = self.renderer if self.enable_video_image else None
+        bangumi_renderer = self.renderer if self.enable_bangumi_image else None
         llm_tools = (
             BgmAdvancedSubjectSearchTool(
                 token=self.bangumi_token,
+                renderer=bangumi_renderer,
             ),
             BgmRecommendHotSubjectsTool(
                 token=self.bangumi_token,
+                renderer=bangumi_renderer,
             ),
             BgmDailyTool(
                 token=self.bangumi_token,
             ),
             BiliSearchHotVideosTool(
                 bili_client=self.bili_client,
+                renderer=video_renderer,
             ),
             BiliUserDynamicsTool(
                 bili_client=self.bili_client,
@@ -204,69 +213,65 @@ class Main(Star):
         return filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub
 
     @staticmethod
-    def _build_filter_desc(
-        filter_types: List[str],
-        filter_regex: List[str],
-        live_atall: bool,
-        at_all: bool = False,
-        at_sub_users_len: int = 0,
-    ) -> str:
-        filter_desc = ""
-        if filter_types:
-            filter_desc += f"<br>过滤类型: {', '.join(filter_types)}"
-        if filter_regex:
-            filter_desc += f"<br>过滤正则: {filter_regex}"
-        if live_atall:
-            filter_desc += "<br>直播开播@全体: 开启"
-        else:
-            filter_desc += "<br>直播开播@全体: 关闭"
-        if at_all:
-            filter_desc += "<br>@全体成员: 开启"
-        else:
-            filter_desc += "<br>@全体成员: 关闭"
-        filter_desc += f"<br>@特定订阅者人数: {at_sub_users_len}"
-        return filter_desc
-
-    @staticmethod
     def _build_subscription_payload(
         uid: int,
         name: str,
-        sex: str,
         avatar: str,
-        mid: int,
-        filter_desc: str,
-    ) -> RenderPayload:
-        link = f"https://space.bilibili.com/{mid}"
-        return RenderPayload(
-            uid=str(uid),
-            name="AstrBot",
-            avatar=image_to_base64(LOGO_PATH),
-            text=f"📣 订阅成功！<br>UP 主: {name} | 性别: {sex}{filter_desc}",
-            image_urls=[avatar] if avatar else [],
-            url=link,
-            qrcode=create_qrcode(link),
-        )
+        note: str = "",
+    ) -> dict:
+        return {
+            "uid": str(uid),
+            "name": name,
+            "avatar": avatar,
+            "note": note.strip(),
+        }
+
+    async def _render_sub_success(self, context: dict) -> str | None:
+        try:
+            with open(SUB_SUCCESS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+                tmpl = f.read()
+        except Exception as e:
+            logger.error(f"加载订阅成功模板失败: {e}")
+            return None
+        options = {
+            "full_page": True,
+            "type": "jpeg",
+            "quality": 95,
+            "scale": "device",
+            "device_scale_factor_level": "ultra",
+            "viewport_height": 1,
+        }
+        try:
+            img_path = await self.html_render(
+                tmpl=tmpl, data=context, return_url=False, options=options
+            )
+        except Exception as e:
+            logger.error(f"渲染订阅成功图片失败: {e}")
+            return None
+        if img_path and os.path.exists(img_path):
+            return img_path
+        return None
 
     async def _send_subscription_result(
-        self, event: AstrMessageEvent, payload: RenderPayload, avatar: str
+        self, event: AstrMessageEvent, payload: dict
     ) -> MessageEventResult | None:
-        text = "\n".join(filter(None, payload.text.split("<br>")))
+        name = payload.get("name", "")
+        uid = payload.get("uid", "")
+        note = payload.get("note", "")
+        text = f"订阅成功！UP 主: {name} (UID: {uid})"
+        if note:
+            text += f"\n{note}"
         if self.rai:
-            img_path = await self.renderer.render_dynamic(payload)
+            img_path = await self._render_sub_success(payload)
             if img_path:
-                await event.send(
-                    MessageChain().file_image(img_path).message(payload.url)
-                )
+                await event.send(MessageChain().file_image(img_path))
                 return None
-            msg = "渲染图片失败了 (´;ω;`)"
-            chain = MessageChain().message(msg).message(text)
-            if avatar:
-                chain = chain.url_image(avatar)
-            await event.send(chain)
+            await event.send(MessageChain().message(text))
             return None
-        chain = [Plain(text)]
+        chain = MessageChain().message(text)
+        avatar = payload.get("avatar", "")
         if avatar:
-            chain.append(Image.fromURL(avatar))
+            chain = chain.url_image(avatar)
         return MessageEventResult(chain=chain, use_t2i_=False)
 
     async def _apply_subscription(
@@ -368,13 +373,12 @@ class Main(Star):
 
         # 不带参数：显示可用样式列表
         if not style:
-            lines = ["📋 可用的卡片样式："]
+            lines = ["📋 卡片样式："]
             for tid in available:
                 info = CARD_TEMPLATES[tid]
                 current = " ← 当前" if tid == self.style else ""
                 lines.append(f"  • {tid}: {info['name']}{current}")
-                lines.append(f"    {info['description']}")
-            lines.append("\n使用 /卡片样式 <样式名> 切换")
+            lines.append("\n使用 /bili_card_style <样式名> 切换样式")
             return MessageEventResult().message("\n".join(lines))
 
         # 带参数：切换样式
@@ -425,18 +429,45 @@ class Main(Star):
             info = video_data["info"]
             online = video_data["online"]
 
+            owner = info.get("owner") or {}
+            staff = info.get("staff") or []
+            if staff:
+                authors = [
+                    {
+                        "name": str(s.get("name") or ""),
+                        "face": str(s.get("face") or ""),
+                        "uid": str(s.get("mid") or ""),
+                    }
+                    for s in staff
+                ]
+            else:
+                authors = [
+                    {
+                        "name": str(owner.get("name") or ""),
+                        "face": str(owner.get("face") or ""),
+                        "uid": str(owner.get("mid") or ""),
+                    }
+                ]
+
+            def _fmt_time(ts) -> str:
+                try:
+                    return time.strftime("%Y-%m-%d", time.localtime(int(ts)))
+                except Exception:
+                    return ""
+
+            stat = info.get("stat") or {}
             payload = RenderPayload(
-                name="AstrBot",
-                avatar=image_to_base64(LOGO_PATH),
-                title=info["title"],
-                text=(
-                    f"UP 主: {info['owner']['name']}<br>"
-                    f"播放量: {info['stat']['view']}<br>"
-                    f"点赞: {info['stat']['like']}<br>"
-                    f"投币: {info['stat']['coin']}<br>"
-                    f"总共 {online['total']} 人正在观看"
-                ),
-                image_urls=[info["pic"]],
+                name=str(owner.get("name") or ""),
+                avatar=str(owner.get("face") or ""),
+                authors=authors,
+                title=str(info.get("title") or ""),
+                desc=str(info.get("desc") or ""),
+                pub_time=_fmt_time(info.get("pubdate")),
+                stat_view=str(stat.get("view", 0)),
+                stat_like=str(stat.get("like", 0)),
+                stat_coin=str(stat.get("coin", 0)),
+                online=str((online or {}).get("total", 0)),
+                image_urls=[str(info.get("pic") or "")],
             )
 
             img_path = await self.renderer.render_dynamic(payload)
@@ -444,7 +475,13 @@ class Main(Star):
                 await event.send(MessageChain().file_image(img_path))
             else:
                 msg = "渲染图片失败了 (´;ω;`)"
-                text = "\n".join(filter(None, payload.text.split("<br>")))
+                lines = [
+                    payload.title,
+                    payload.desc,
+                    f"播放 {payload.stat_view}  点赞 {payload.stat_like}  投币 {payload.stat_coin}",
+                    f"总共 {payload.online} 人正在观看",
+                ]
+                text = "\n".join(filter(None, lines))
                 await event.send(
                     MessageChain().message(msg).message(text).url_image(info["pic"])
                 )
@@ -507,64 +544,154 @@ class Main(Star):
                 f"订阅成功，但获取 UP 主信息失败: {msg}"
             )
 
-        filter_desc = self._build_filter_desc(
-            filter_types,
-            filter_regex,
-            live_atall,
-            at_all=at_all,
-            at_sub_users_len=len(add_sub_users or []),
-        )
-        if warning:
-            filter_desc += warning.replace("\n", "<br>")
-
         payload = self._build_subscription_payload(
             uid_int,
             str(usr_info.get("name", "Unknown")),
-            str(usr_info.get("sex", "保密")),
             str(usr_info.get("face", "")),
-            int(usr_info.get("mid", uid_int)),
-            filter_desc,
+            note=warning,
         )
-        return await self._send_subscription_result(
-            event, payload, str(usr_info.get("face", ""))
+        return await self._send_subscription_result(event, payload)
+
+    @staticmethod
+    def _extract_sid(sub_user: str) -> str:
+        parts = sub_user.split(":", 2)
+        return parts[2] if len(parts) >= 3 else sub_user
+
+    @staticmethod
+    def _extract_chat_type(sub_user: str) -> str:
+        parts = sub_user.split(":", 2)
+        return "Group" if len(parts) >= 2 and "Group" in parts[1] else "Private"
+
+    async def _resolve_session_display_name(self, sub_user: str) -> str:
+        """解析会话显示名：群聊返回群名，私聊返回 QQ 昵称。解析失败返回空字符串。"""
+        try:
+            platform_id, message_type, session_id = sub_user.split(":", 2)
+        except ValueError:
+            return ""
+
+        platform_inst = self.context.get_platform_inst(platform_id)
+        if not platform_inst:
+            return ""
+
+        client = platform_inst.get_client()
+        if not client or not hasattr(client, "call_action"):
+            return ""
+
+        def _unwrap(raw: Any) -> dict:
+            if not isinstance(raw, dict):
+                return {}
+            data = raw.get("data")
+            return data if isinstance(data, dict) else raw
+
+        try:
+            if message_type == "GroupMessage":
+                group_id = int(session_id) if str(session_id).isdigit() else session_id
+                raw = await client.call_action("get_group_info", group_id=group_id)
+                return str(_unwrap(raw).get("group_name") or "")
+            else:
+                user_id = int(session_id) if str(session_id).isdigit() else session_id
+                raw = await client.call_action(
+                    "get_stranger_info", user_id=user_id, no_cache=False
+                )
+                info = _unwrap(raw)
+                return str(info.get("nickname") or info.get("nick") or "")
+        except Exception as e:
+            logger.debug(f"解析会话显示名失败 ({sub_user}): {e}")
+            return ""
+
+    async def _build_sub_list_item(self, uid_sub_data: SubscriptionRecord) -> dict:
+        uid = uid_sub_data.uid
+        name = str(uid)
+        try:
+            info, _ = await self.bili_client.get_user_info(int(uid))
+            if info and info.get("name"):
+                name = str(info["name"])
+        except Exception as e:
+            logger.warning(f"获取 UP 主信息失败 (UID: {uid}): {e}")
+
+        return {
+            "uid": str(uid),
+            "name": name,
+            "filter_types": list(uid_sub_data.filter_types),
+            "filter_regex": list(uid_sub_data.filter_regex),
+            "live_atall": bool(uid_sub_data.live_atall),
+            "at_all": bool(uid_sub_data.at_all),
+            "at_sub_users": list(uid_sub_data.at_sub_users),
+        }
+
+    async def _send_sub_list_image(
+        self,
+        event: AstrMessageEvent,
+        title: str,
+        sessions: List[dict],
+        total: int,
+    ) -> MessageEventResult:
+        context = {
+            "title": title,
+            "total": total,
+            "sessions": sessions,
+        }
+
+        try:
+            with open(SUB_LIST_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+                tmpl = f.read()
+        except Exception as e:
+            logger.error(f"加载订阅列表模板失败: {e}")
+            return MessageEventResult().message("订阅列表模板加载失败")
+
+        options = {
+            "full_page": True,
+            "type": "jpeg",
+            "quality": 95,
+            "scale": "device",
+            "device_scale_factor_level": "ultra",
+            "viewport_height": 1,
+        }
+
+        try:
+            img_path = await self.html_render(
+                tmpl=tmpl, data=context, return_url=False, options=options
+            )
+        except Exception as e:
+            logger.error(f"渲染订阅列表失败: {e}")
+            img_path = None
+
+        if not img_path or not os.path.exists(img_path):
+            return MessageEventResult().message("订阅列表渲染失败")
+
+        platform_name = self.dynamic_listener._resolve_platform_name(
+            event.unified_msg_origin
         )
+        if is_height_valid(img_path, platform_name):
+            chain_parts = [Image.fromFileSystem(img_path)]
+        else:
+            timestamp = int(time.time())
+            filename = f"bilibili_sub_list_{timestamp}.jpg"
+            chain_parts = [File(file=img_path, name=filename)]
+
+        return MessageEventResult(chain=chain_parts, use_t2i_=False)
 
     @command("bili_sub_list", alias={"订阅列表"})
     async def sub_list(self, event: AstrMessageEvent):
-        """查看 bilibili 动态监控列表"""
+        """查看 bilibili 动态监控列表（以图片形式展示）"""
         sub_user = event.unified_msg_origin
-        ret = """订阅列表：\n"""
         subs = self.data_manager.get_subscriptions_by_user(sub_user)
 
         if not subs:
             return MessageEventResult().message("无订阅")
-        else:
-            for idx, uid_sub_data in enumerate(subs):
-                uid = uid_sub_data.uid
-                info, _ = await self.bili_client.get_user_info(int(uid))
-                if not info:
-                    ret += f"{idx + 1}. {uid} - 无法获取 UP 主信息\n"
-                else:
-                    name = info["name"]
-                    ret += f"{idx + 1}. {uid} - {name}\n"
-                filters = []
-                if uid_sub_data.filter_types:
-                    filters.append(f"过滤类型: {', '.join(uid_sub_data.filter_types)}")
-                if uid_sub_data.filter_regex:
-                    filters.append(f"过滤正则: {uid_sub_data.filter_regex}")
-                if uid_sub_data.live_atall:
-                    filters.append("直播@全体: 开启")
-                else:
-                    filters.append("直播@全体: 关闭")
-                if uid_sub_data.at_all:
-                    filters.append("@全体成员: 开启")
-                else:
-                    filters.append("@全体成员: 关闭")
-                if uid_sub_data.at_sub_users:
-                    filters.append(f"@订阅者: [{', '.join(uid_sub_data.at_sub_users)}]")
-                if filters:
-                    ret += f"   {'｜'.join(filters)}\n"
-            return MessageEventResult().message(ret)
+
+        items = [await self._build_sub_list_item(s) for s in subs]
+        sessions = [
+            {
+                "sid": self._extract_sid(sub_user),
+                "chat_type": self._extract_chat_type(sub_user),
+                "display_name": await self._resolve_session_display_name(sub_user),
+                "subs": items,
+            }
+        ]
+        return await self._send_sub_list_image(
+            event, "B站订阅列表", sessions, len(items)
+        )
 
     @command("bili_sub_del", alias={"订阅删除"})
     async def sub_del(self, event: AstrMessageEvent, uid: str):
@@ -695,18 +822,28 @@ class Main(Star):
     @permission_type(PermissionType.ADMIN)
     @command("bili_global_list", alias={"全局列表"})
     async def global_list(self, event: AstrMessageEvent):
-        """管理员指令。查看所有订阅者"""
-        ret = "订阅会话列表：\n"
+        """管理员指令。以图片形式查看所有订阅者"""
         all_subs = self.data_manager.get_all_subscriptions()
         if not all_subs:
             return MessageEventResult().message("没有任何会话订阅过。")
 
-        for sub_user in all_subs:
-            ret += f"- {sub_user}\n"
-            for sub in all_subs[sub_user]:
-                uid = sub.uid
-                ret += f"  - {uid}\n"
-        return MessageEventResult().message(ret)
+        sessions = []
+        total = 0
+        for sub_user, sub_list in all_subs.items():
+            items = [await self._build_sub_list_item(s) for s in sub_list]
+            total += len(items)
+            sessions.append(
+                {
+                    "sid": self._extract_sid(sub_user),
+                    "chat_type": self._extract_chat_type(sub_user),
+                    "display_name": await self._resolve_session_display_name(sub_user),
+                    "subs": items,
+                }
+            )
+
+        return await self._send_sub_list_image(
+            event, "全局订阅列表", sessions, total
+        )
 
     @event_message_type(EventMessageType.ALL)
     async def parse_miniapp(self, event: AstrMessageEvent):

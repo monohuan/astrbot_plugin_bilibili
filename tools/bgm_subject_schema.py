@@ -71,7 +71,7 @@ _COMMON_FILTER_PROPERTIES: dict[str, Any] = {
 _PAGING_PROPERTIES: dict[str, Any] = {
     "limit": {
         "type": "integer",
-        "description": "返回条数。默认 5，最大 10，超过会被截断到 10。",
+        "description": "返回条数。用户只要一个条目时设为 1，要列表时设 5 左右。默认 5，最大 10，超过会被截断到 10。",
     },
     "offset": {
         "type": "integer",

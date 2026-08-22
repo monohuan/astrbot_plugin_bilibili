@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=580">
+<title>Bilibili Video List</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: #0a0a0c;
+        font-family: -apple-system, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+    }
+    .list {
+        width: 580px;
+        max-width: 100%;
+        background: #121214;
+        border-radius: 12px;
+        overflow: hidden;
+        position: relative;
+    }
+    .list::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 3px;
+        background: #7CB342;
+        z-index: 10;
+    }
+    .list-header {
+        padding: 18px 22px 14px;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+    }
+    .list-title {
+        font-size: 17px;
+        font-weight: 700;
+        color: #ededee;
+        letter-spacing: 0.5px;
+    }
+    .list-count {
+        font-size: 11px;
+        font-weight: 600;
+        color: #7CB342;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        flex-shrink: 0;
+    }
+    .divider {
+        height: 1px;
+        background: #2a2a2e;
+        margin: 0 22px;
+    }
+    .items {
+        padding: 16px 22px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+    .item {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+    }
+    .rank {
+        width: 24px;
+        text-align: center;
+        font-size: 16px;
+        font-weight: 700;
+        color: #5a5a5e;
+        flex-shrink: 0;
+        font-variant-numeric: tabular-nums;
+    }
+    .rank.top1 { color: #f6c244; }
+    .rank.top2 { color: #c8ccd4; }
+    .rank.top3 { color: #d29a6b; }
+    .cover-wrap {
+        position: relative;
+        flex-shrink: 0;
+    }
+    .cover {
+        width: 152px;
+        height: 86px;
+        border-radius: 8px;
+        object-fit: cover;
+        background: #1e1e22;
+        border: 1px solid #2a2a2e;
+        display: block;
+    }
+    .duration {
+        position: absolute;
+        right: 6px;
+        bottom: 6px;
+        background: rgba(0, 0, 0, 0.78);
+        color: #e8e8ea;
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-variant-numeric: tabular-nums;
+    }
+    .info {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        flex: 1;
+        gap: 8px;
+    }
+    .title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #ededee;
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+    }
+    .meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .author {
+        font-size: 12px;
+        color: #b0b0b4;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .chip {
+        font-size: 12px;
+        color: #8a8a8e;
+        background: #1a1a1e;
+        border: 1px solid #2a2a2e;
+        padding: 2px 8px;
+        border-radius: 999px;
+        line-height: 1.4;
+        white-space: nowrap;
+    }
+    .chip.highlight {
+        color: #7CB342;
+        border-color: rgba(124, 179, 66, 0.35);
+    }
+</style>
+</head>
+<body>
+<div class="list">
+    <div class="list-header">
+        <span class="list-title">{{ title }}</span>
+        <span class="list-count">共 {{ videos | length }} 项</span>
+    </div>
+    <div class="divider"></div>
+    <div class="items">
+        {% for v in videos %}
+        <div class="item">
+            <span class="rank {% if loop.index == 1 %}top1{% elif loop.index == 2 %}top2{% elif loop.index == 3 %}top3{% endif %}">{{ loop.index }}</span>
+            <div class="cover-wrap">
+                {% if v.cover %}<img class="cover" src="{{ v.cover }}" alt="cover">{% endif %}
+                {% if v.duration != '未知' %}<span class="duration">{{ v.duration }}</span>{% endif %}
+            </div>
+            <div class="info">
+                <div class="title">{{ v.title }}</div>
+                <div class="meta">
+                    <span class="author">{{ v.author }}</span>
+                    {% if v.play != '未知' %}<span class="chip highlight">{{ v.play }} 播放</span>{% endif %}
+                    {% if v.danmaku != '未知' %}<span class="chip">{{ v.danmaku }} 弹幕</span>{% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+</body>
+</html>

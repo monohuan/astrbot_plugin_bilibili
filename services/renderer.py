@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from astrbot.api import logger
 from astrbot.api.all import Star
@@ -9,9 +9,10 @@ from ..core.constant import (
     BANNER_PATH,
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
-    LOGO_PATH,
     MAX_ATTEMPTS,
     RETRY_DELAY,
+    SUBJECT_LIST_TEMPLATE_PATH,
+    VIDEO_LIST_TEMPLATE_PATH,
     get_template_path,
 )
 from ..core.models import RenderPayload
@@ -73,6 +74,7 @@ class Renderer:
             "quality": 95,
             "scale": "device",
             "device_scale_factor_level": "ultra",
+            "viewport_height": 1,
         }
 
         tmpl = self.get_template(style)
@@ -101,6 +103,55 @@ class Renderer:
                 await asyncio.sleep(RETRY_DELAY)
 
         return None  # 所有尝试都失败
+
+    async def _render_html_list(self, template_path: str, data: dict) -> str | None:
+        """将列表数据渲染成图片。"""
+        try:
+            with open(template_path, "r", encoding="utf-8") as f:
+                tmpl = f.read()
+        except Exception as e:
+            logger.error(f"加载列表模板失败 {template_path}: {e}")
+            return None
+
+        options = {
+            "full_page": True,
+            "type": "jpeg",
+            "quality": 95,
+            "scale": "device",
+            "device_scale_factor_level": "ultra",
+            "viewport_height": 1,
+        }
+
+        try:
+            img_path = await self.star.html_render(
+                tmpl=tmpl,
+                data=data,
+                return_url=False,
+                options=options,
+            )
+        except Exception as e:
+            logger.error(f"渲染列表失败: {e}")
+            return None
+
+        if img_path and os.path.exists(img_path) and self._validate_image(img_path):
+            return img_path
+        return None
+
+    async def render_video_list(
+        self, videos: List[Dict[str, str]], title: str = "视频列表"
+    ) -> str | None:
+        """将视频列表渲染成图片，供自然语言视频搜索使用。"""
+        return await self._render_html_list(
+            VIDEO_LIST_TEMPLATE_PATH, {"title": title, "videos": videos}
+        )
+
+    async def render_subject_list(
+        self, subjects: List[Dict[str, str]], title: str = "番剧列表"
+    ) -> str | None:
+        """将番剧条目列表渲染成图片，供自然语言番剧搜索使用。"""
+        return await self._render_html_list(
+            SUBJECT_LIST_TEMPLATE_PATH, {"title": title, "subjects": subjects}
+        )
 
     @staticmethod
     def _validate_image(img_path: str) -> bool:
@@ -161,8 +212,6 @@ class Renderer:
         payload.text = parse_rich_text(summary, topic)
         payload.title = str(opus.get("title") or "")
         payload.image_urls = [str(pic["url"]) for pic in opus.get("pics", [])[:9]]
-        if not payload.image_urls and self.rai:
-            payload.image_urls = [image_to_base64(LOGO_PATH)]
         if not is_forward:
             payload.url = f"https:{jump_url}"
             payload.qrcode = create_qrcode(payload.url)

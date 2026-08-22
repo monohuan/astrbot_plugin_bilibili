@@ -50,6 +50,14 @@
       "description": "Parse Bilibili Video Links",
       "hint": "When enabled, automatically detect BV numbers and b23.tv short links in messages and reply with video detail cards."
     },
+    "enable_video_image": {
+      "description": "Render Video Search Lists as Image",
+      "hint": "When enabled, natural-language video search results are rendered as image lists. Disable to return plain text (single video still returns image+text)."
+    },
+    "enable_bangumi_image": {
+      "description": "Render Bangumi Search Lists as Image",
+      "hint": "When enabled, natural-language bangumi search results are rendered as image lists. Disable to return plain text (single bangumi still returns image+text)."
+    },
     "dynamic_limit": {
       "description": "Max Dynamics Per Push",
       "hint": "Maximum number of dynamics pushed per uploader per polling cycle, to avoid flooding."

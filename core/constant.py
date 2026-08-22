@@ -12,6 +12,10 @@ def _asset_path(*parts: str) -> str:
 
 LOGO_PATH = _asset_path("Astrbot.png")
 BANNER_PATH = _asset_path("banner.png")
+SUB_LIST_TEMPLATE_PATH = _asset_path("sub_list.html")
+SUB_SUCCESS_TEMPLATE_PATH = _asset_path("sub_success.html")
+VIDEO_LIST_TEMPLATE_PATH = _asset_path("video_list.html")
+SUBJECT_LIST_TEMPLATE_PATH = _asset_path("subject_list.html")
 BV = r"(?:\?.*)?(?:https?:\/\/)?(?:www\.)?(?:bilibili\.com\/video\/(BV[a-zA-Z0-9]+)|b23\.tv\/([a-zA-Z0-9]+))\/?(?:\?.*)?|BV[a-zA-Z0-9]+"
 VALID_FILTER_TYPES = {
     "forward",
@@ -39,28 +43,25 @@ DEFAULT_CFG = {
 # 添加新模板只需在此处注册即可
 
 CARD_TEMPLATES: Dict[str, dict] = {
-    "template_1": {
-        "name": "经典风格",
-        "description": "原版设计",
-        "file": "template_1.html",
-        "path": _asset_path("template_1.html"),
-    },
-    "template_2": {
-        "name": "B站粉风格",
-        "description": "B站风格设计",
-        "file": "template_2.html",
-        "path": _asset_path("template_2.html"),
-    },
     "simple": {
         "name": "简约风格",
-        "description": "简洁现代的设计",
         "file": "template_simple.html",
         "path": _asset_path("template_simple.html"),
+    },
+    "wakaba_dark": {
+        "name": "若叶·暗",
+        "file": "wakaba_dark.html",
+        "path": _asset_path("wakaba_dark.html"),
+    },
+    "wakaba_light": {
+        "name": "若叶·亮",
+        "file": "wakaba_light.html",
+        "path": _asset_path("wakaba_light.html"),
     },
 }
 
 # 默认模板
-DEFAULT_TEMPLATE = "template_2"
+DEFAULT_TEMPLATE = "wakaba_dark"
 
 
 def get_template_path(style: str) -> str:

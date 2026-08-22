@@ -97,6 +97,14 @@ class RenderPayload:
     uid: str = ""
     banner: str = ""
     forward: Optional[ForwardPayload] = None
+    label: str = ""
+    authors: List[Dict[str, str]] = field(default_factory=list)
+    desc: str = ""
+    pub_time: str = ""
+    stat_view: str = ""
+    stat_like: str = ""
+    stat_coin: str = ""
+    online: str = ""
 
     @classmethod
     def from_dict(cls, raw: Optional[Dict[str, Any]]) -> "RenderPayload":
@@ -122,6 +130,14 @@ class RenderPayload:
             uid=str(raw.get("uid", "") or ""),
             banner=str(raw.get("banner", "") or ""),
             forward=forward_payload,
+            label=str(raw.get("label", "") or ""),
+            authors=list(raw.get("authors") or []),
+            desc=str(raw.get("desc", "") or ""),
+            pub_time=str(raw.get("pub_time", "") or ""),
+            stat_view=str(raw.get("stat_view", "") or ""),
+            stat_like=str(raw.get("stat_like", "") or ""),
+            stat_coin=str(raw.get("stat_coin", "") or ""),
+            online=str(raw.get("online", "") or ""),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -138,6 +154,14 @@ class RenderPayload:
             "summary": self.summary,
             "uid": self.uid,
             "banner": self.banner,
+            "label": self.label,
+            "authors": list(self.authors),
+            "desc": self.desc,
+            "pub_time": self.pub_time,
+            "stat_view": self.stat_view,
+            "stat_like": self.stat_like,
+            "stat_coin": self.stat_coin,
+            "online": self.online,
         }
         if self.forward:
             payload["forward"] = self.forward.to_dict()

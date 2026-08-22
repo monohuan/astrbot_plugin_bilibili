@@ -50,6 +50,14 @@
       "description": "解析 B 站视频链接",
       "hint": "启用后自动解析消息中的 BV 号和 b23.tv 短链接，回复视频详情卡片。"
     },
+    "enable_video_image": {
+      "description": "视频搜索列表图片",
+      "hint": "启用后将自然语言搜索到的视频列表渲染为图片列表；关闭则返回纯文本（单个视频仍返回图文）。"
+    },
+    "enable_bangumi_image": {
+      "description": "番剧搜索列表图片",
+      "hint": "启用后将自然语言搜索到的番剧列表渲染为图片列表；关闭则返回纯文本（单个番剧仍返回图文）。"
+    },
     "dynamic_limit": {
       "description": "单次推送上限",
       "hint": "每个UP主每次轮询最大推送动态条数，避免一次性推送过多消息。"

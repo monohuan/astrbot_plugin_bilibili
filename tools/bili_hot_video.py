@@ -1,12 +1,11 @@
 import html
 import re
-from datetime import datetime
 from typing import Any, Optional
 
 from astrbot.api import FunctionTool
+from astrbot.api.event import MessageEventResult
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
-from mcp.types import CallToolResult
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
@@ -69,17 +68,28 @@ def _format_count(raw: Any) -> str:
     return "未知"
 
 
-def _format_pubdate(raw: Any) -> str:
-    if isinstance(raw, int) and raw > 0:
-        return datetime.fromtimestamp(raw).strftime("%Y-%m-%d")
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            return "未知"
-        if len(text) >= 10 and text[4] == "-" and text[7] == "-":
-            return text[:10]
-        return text
+def _format_duration(raw: Any) -> str:
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if isinstance(raw, (int, float)) and raw > 0:
+        total = int(raw)
+        hours, remainder = divmod(total, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
     return "未知"
+
+
+def _normalize_image_url(raw: Any) -> str:
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    url = raw.strip()
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return url
 
 
 def _extract_hot_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -96,51 +106,51 @@ def _extract_search_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict)]
 
 
-def _build_line(index: int, item: dict[str, Any], *, source: str) -> str:
+def _to_video_dict(item: dict[str, Any], *, source: str) -> dict[str, str]:
     title = _clean_title(item.get("title"))
+    bvid = item.get("bvid") or "未知BV"
+    url = f"https://www.bilibili.com/video/{bvid}"
+    duration = _format_duration(item.get("duration"))
+    cover = _normalize_image_url(item.get("pic"))
+
     if source == HOT_SORT:
-        owner = item.get("owner", {})
+        owner = item.get("owner") or {}
         author = owner.get("name") if isinstance(owner, dict) else "未知UP"
-        stat = item.get("stat", {})
-        bvid = item.get("bvid") or "未知BV"
-        play = _format_count(stat.get("view") if isinstance(stat, dict) else None)
-        danmaku = _format_count(stat.get("danmaku") if isinstance(stat, dict) else None)
-        like = _format_count(stat.get("like") if isinstance(stat, dict) else None)
-        pubdate = _format_pubdate(item.get("pubdate"))
+        stat = item.get("stat") or {}
+        if isinstance(stat, dict):
+            play = _format_count(stat.get("view"))
+            danmaku = _format_count(stat.get("danmaku"))
+        else:
+            play = "未知"
+            danmaku = "未知"
     else:
         author = item.get("author") or "未知UP"
-        bvid = item.get("bvid") or "未知BV"
         play = _format_count(item.get("play"))
         danmaku = _format_count(item.get("video_review"))
-        like = _format_count(item.get("like"))
-        pubdate = _format_pubdate(item.get("pubdate"))
-    return (
-        f"{index}. {title}\n"
-        f"BV号: {bvid}\n"
-        f"链接: https://www.bilibili.com/video/{bvid}\n"
-        f"UP: {author}\n"
-        f"播放: {play} | 弹幕: {danmaku} | 点赞: {like} | 发布: {pubdate}"
-    )
 
-
-def _format_result(title: str, items: list[dict[str, Any]], *, source: str) -> str:
-    lines = [f"{title}:"]
-    for index, item in enumerate(items, start=1):
-        lines.append(_build_line(index, item, source=source))
-        lines.append("")
-    lines.append("请分点回答，不要输出 markdown。")
-    lines.append("回答时每条推荐必须保留对应 BV号。")
-    return "\n".join(lines)
+    return {
+        "title": title,
+        "author": str(author),
+        "duration": duration,
+        "play": play,
+        "danmaku": danmaku,
+        "cover": cover,
+        "url": url,
+        "bvid": str(bvid),
+    }
 
 
 @dataclass
 class BiliSearchHotVideosTool(FunctionTool):
     name: str = "bili_search_hot_videos"
     description: str = (
-        "当用户想找哔哩哔哩热门视频、热榜视频、近期高热视频时调用。"
-        "支持两种模式：无关键词时返回全站热门；有关键词时按视频搜索并按热度/播放/最新等排序。"
+        "当用户想找哔哩哔哩视频时调用。"
+        "若用户说“给我找一个/找个/推荐一个/来一个 XX 视频”这类只要一个视频的话，把 limit 设为 1；"
+        "若用户说“帮我找下/有没有 XX 相关的视频/有哪些视频”这类要列表的话，把 limit 设为 5 左右。"
+        "无关键词时返回全站热门；有关键词时按关键词搜索。"
     )
     bili_client: Any = None
+    renderer: Any = None
     parameters: dict = Field(
         default_factory=lambda: {
             "type": "object",
@@ -158,7 +168,7 @@ class BiliSearchHotVideosTool(FunctionTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "返回数量，范围 1-20，默认 8。",
+                    "description": "返回数量。用户只要一个视频时设为 1，要列表时设为 5 左右。范围 1-20，默认 8。",
                     "minimum": MIN_LIMIT,
                     "maximum": MAX_LIMIT,
                 },
@@ -183,7 +193,7 @@ class BiliSearchHotVideosTool(FunctionTool):
         limit: int = DEFAULT_LIMIT,
         page: int = DEFAULT_PAGE,
         tid: Optional[int] = None,
-    ) -> str | CallToolResult:
+    ) -> MessageEventResult | str:
         _ = context
         if self.bili_client is None:
             raise RuntimeError("bili_client 未初始化")
@@ -202,20 +212,59 @@ class BiliSearchHotVideosTool(FunctionTool):
                 video_zone_type=tid,
             )
             if not payload:
-                return "搜索热门视频失败，请稍后重试。"
+                return "搜索视频失败，请稍后重试。"
             items = _extract_search_items(payload)
-            if not items:
-                return "未找到符合条件的视频。可以换个关键词或排序方式。"
-            title = f"B站热门视频搜索结果（关键词：{normalized_keyword}，排序：{normalized_sort}）"
-            return _format_result(title, items[:normalized_limit], source="search")
+            source = "search"
+        else:
+            payload = await self.bili_client.get_hot_videos(
+                pn=normalized_page, ps=normalized_limit
+            )
+            if not payload:
+                return "获取B站热门视频失败，请稍后重试。"
+            items = _extract_hot_items(payload)
+            source = HOT_SORT
 
-        payload = await self.bili_client.get_hot_videos(
-            pn=normalized_page, ps=normalized_limit
-        )
-        if not payload:
-            return "获取B站热门视频失败，请稍后重试。"
-        items = _extract_hot_items(payload)
         if not items:
-            return "当前未获取到热门视频数据。"
-        title = f"B站全站热门视频（第 {normalized_page} 页）"
-        return _format_result(title, items[:normalized_limit], source=HOT_SORT)
+            return "未找到符合条件的视频。可以换个关键词或排序方式。"
+
+        videos = [
+            _to_video_dict(item, source=source)
+            for item in items[:normalized_limit]
+        ]
+
+        if normalized_limit == 1 and videos:
+            v = videos[0]
+            text = (
+                f"《{v['title']}》\n"
+                f"UP主：{v['author']} | 时长：{v['duration']}\n"
+                f"播放：{v['play']} | 弹幕：{v['danmaku']}\n"
+                f"链接：{v['url']}"
+            )
+            result = MessageEventResult()
+            if v["cover"]:
+                result.url_image(v["cover"])
+            result.message(text)
+            return result
+
+        list_title = (
+            "B站热门视频"
+            if not normalized_keyword
+            else f"「{normalized_keyword}」搜索结果"
+        )
+        img_path = None
+        if self.renderer is not None:
+            try:
+                img_path = await self.renderer.render_video_list(
+                    videos, title=list_title
+                )
+            except Exception:
+                img_path = None
+
+        if img_path:
+            return MessageEventResult().file_image(img_path)
+
+        lines = [
+            f"{i}. 《{v['title']}》\nUP主：{v['author']}  时长：{v['duration']}\n{v['url']}"
+            for i, v in enumerate(videos, start=1)
+        ]
+        return "\n".join(lines)
