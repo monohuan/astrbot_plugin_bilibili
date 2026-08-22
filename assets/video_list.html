@@ -159,7 +159,7 @@
         <div class="item">
             <span class="rank {% if loop.index == 1 %}top1{% elif loop.index == 2 %}top2{% elif loop.index == 3 %}top3{% endif %}">{{ loop.index }}</span>
             <div class="cover-wrap">
-                {% if v.cover %}<img class="cover" src="{{ v.cover }}" alt="cover">{% endif %}
+                {% if v.cover %}<img class="cover" src="{{ v.cover }}" alt="">{% endif %}
                 {% if v.duration != '未知' %}<span class="duration">{{ v.duration }}</span>{% endif %}
             </div>
             <div class="info">

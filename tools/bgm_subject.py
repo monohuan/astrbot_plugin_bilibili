@@ -9,6 +9,7 @@ from pydantic import Field
 from pydantic.dataclasses import dataclass
 
 from ..bgm_client import DEFAULT_BANGUMI_USER_AGENT, BangumiApiClient
+from ..core.utils import url_to_base64
 from .bgm_subject_schema import (
     build_advanced_parameters_schema,
     build_recent_hot_parameters_schema,
@@ -214,6 +215,14 @@ def _to_subject_dict(subject: dict[str, Any]) -> dict[str, str]:
     }
 
 
+async def _embed_covers(subject_dicts: list[dict[str, str]]) -> None:
+    """将封面的远程 URL 下载并替换为 Base64 Data URI，避免文转图服务无法拉取 bgm.tv 图片。"""
+    for d in subject_dicts:
+        cover = d.get("cover", "")
+        if cover:
+            d["cover"] = await url_to_base64(cover) or ""
+
+
 def _format_single_subject(subject: dict[str, Any]) -> str:
     title = subject.get("name_cn") or subject.get("name") or "未知条目"
     sid = subject.get("id", "未知ID")
@@ -328,6 +337,7 @@ class BgmAdvancedSubjectSearchTool(FunctionTool):
         if self.renderer is not None:
             try:
                 subject_dicts = [_to_subject_dict(s) for s in subjects]
+                await _embed_covers(subject_dicts)
                 img_path = await self.renderer.render_subject_list(
                     subject_dicts, title=list_title
                 )
@@ -394,6 +404,7 @@ class BgmRecommendHotSubjectsTool(FunctionTool):
         if self.renderer is not None:
             try:
                 subject_dicts = [_to_subject_dict(s) for s in subjects]
+                await _embed_covers(subject_dicts)
                 img_path = await self.renderer.render_subject_list(
                     subject_dicts, title=list_title
                 )

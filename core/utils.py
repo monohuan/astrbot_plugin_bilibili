@@ -5,6 +5,7 @@ import os
 import re
 from urllib.parse import urlparse
 
+import aiohttp
 import qrcode
 import qrcode.constants
 from astrbot.api import logger
@@ -33,6 +34,39 @@ def image_to_base64(image_source, mime_type: str = "image/png") -> str:
 
     base64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:{mime_type};base64,{base64_str}"
+
+
+async def url_to_base64(url: str, timeout: int = 10) -> str:
+    """
+    下载远程图片并转为 Base64 Data URI，供文转图模板内嵌使用。
+    失败时返回空字符串，调用方应回退到原始 URL 或空值。
+    """
+    if not url or not is_valid_url(url):
+        return ""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://bgm.tv/",
+    }
+    try:
+        timeout_obj = aiohttp.ClientTimeout(total=timeout)
+        async with aiohttp.ClientSession(timeout=timeout_obj) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status != 200:
+                    return ""
+                data = await resp.read()
+                if not data:
+                    return ""
+                content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+                mime_type = content_type if content_type.startswith("image/") else "image/jpeg"
+                b64 = base64.b64encode(data).decode("utf-8")
+                return f"data:{mime_type};base64,{b64}"
+    except Exception as e:
+        logger.error(f"下载图片失败 {url}: {e}")
+        return ""
 
 
 def create_qrcode(url):

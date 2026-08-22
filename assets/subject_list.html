@@ -135,7 +135,7 @@
         {% for s in subjects %}
         <div class="item">
             <span class="rank {% if loop.index == 1 %}top1{% elif loop.index == 2 %}top2{% elif loop.index == 3 %}top3{% endif %}">{{ loop.index }}</span>
-            {% if s.cover %}<img class="cover" src="{{ s.cover }}" alt="cover">{% endif %}
+            {% if s.cover %}<img class="cover" src="{{ s.cover }}" alt="">{% endif %}
             <div class="info">
                 <div class="title">{{ s.title }}</div>
                 <div class="meta">
