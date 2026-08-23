@@ -110,6 +110,21 @@
             gap: 2px;
             min-width: 0;
         }
+        .up-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+        .up-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #2a2a2e;
+            flex-shrink: 0;
+            background: #1e1e22;
+        }
         .up-name {
             font-size: 17px;
             font-weight: 600;
@@ -200,9 +215,14 @@
         {% for item in session.subs %}
         <div class="sub-card">
             <div class="sub-head">
-                <div class="up-info">
-                    <div class="up-name">{{ item.name | default('未知UP主') }}</div>
-                    <div class="up-uid">UID {{ item.uid }}</div>
+                <div class="up-main">
+                    {% if item.face %}
+                    <img src="{{ item.face }}" alt="avatar" class="up-avatar">
+                    {% endif %}
+                    <div class="up-info">
+                        <div class="up-name">{{ item.name | default('未知UP主') }}</div>
+                        <div class="up-uid">UID {{ item.uid }}</div>
+                    </div>
                 </div>
                 <div class="sub-index">#{{ loop.index }}</div>
             </div>

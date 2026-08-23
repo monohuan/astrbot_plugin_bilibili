@@ -602,16 +602,20 @@ class Main(Star):
     async def _build_sub_list_item(self, uid_sub_data: SubscriptionRecord) -> dict:
         uid = uid_sub_data.uid
         name = str(uid)
+        face = ""
         try:
             info, _ = await self.bili_client.get_user_info(int(uid))
-            if info and info.get("name"):
-                name = str(info["name"])
+            if info:
+                if info.get("name"):
+                    name = str(info["name"])
+                face = str(info.get("face") or "")
         except Exception as e:
             logger.warning(f"获取 UP 主信息失败 (UID: {uid}): {e}")
 
         return {
             "uid": str(uid),
             "name": name,
+            "face": face,
             "filter_types": list(uid_sub_data.filter_types),
             "filter_regex": list(uid_sub_data.filter_regex),
             "live_atall": bool(uid_sub_data.live_atall),
@@ -740,6 +744,24 @@ class Main(Star):
             )
 
         msg = await self.data_manager.remove_all_for_user(umo)
+        return MessageEventResult().message(msg)
+
+    @permission_type(PermissionType.ADMIN)
+    @command("bili_clear", alias={"清空订阅"})
+    async def clear_sub(self, event: AstrMessageEvent, raw_args: GreedyStr = ""):
+        """管理员指令。清空所有订阅；可指定 SID 仅清空该会话的订阅。
+        用法: /bili_clear 或 /bili_clear <SID>
+        """
+        raw = (raw_args or "").strip()
+        if not raw:
+            count = await self.data_manager.clear_all_subscriptions()
+            if count:
+                return MessageEventResult().message(
+                    f"已清空所有订阅（共 {count} 个会话）。"
+                )
+            return MessageEventResult().message("当前没有任何订阅。")
+
+        msg = await self.data_manager.remove_all_for_user(raw)
         return MessageEventResult().message(msg)
 
     @permission_type(PermissionType.ADMIN)

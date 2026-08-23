@@ -1,3 +1,7 @@
+## v1.6.7
+- 订阅列表（`bili_sub_list` / `bili_global_list`）新增 UP 主头像展示。
+- 新增 `bili_clear` 指令：不带参数清空所有订阅，带 `<SID>` 参数仅清空指定会话的订阅（仅管理员）。
+
 ## v1.6.6
 - 修复 `/bili_sub_list` 与 `/bili_global_list` 因 `Any` 未导入导致的 `NameError`（会话显示名解析失败）。
 

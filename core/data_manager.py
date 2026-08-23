@@ -272,3 +272,14 @@ class DataManager:
 
         msg = "找到多个订阅者: " + ", ".join(candidate)
         return msg
+
+    async def clear_all_subscriptions(self) -> int:
+        """
+        清空所有订阅（管理员指令）。返回被清空的会话数。
+        """
+        all_subs = self.get_all_subscriptions()
+        count = len(all_subs)
+        if count:
+            self.data["bili_sub_list"] = {}
+            await self.save()
+        return count

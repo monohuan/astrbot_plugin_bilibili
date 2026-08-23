@@ -56,6 +56,7 @@ plugin i https://github.com/Soulter/astrbot_plugin_bilibili
 | **bili_global_del** | `<SID>` | **[管理员]** 删除指定会话的所有订阅。使用 `/sid` 指令可查看会话 UMO。建议以「」包裹SID，形如`/bili_global_del 「QQ 12345:FriendMessage:67890」` | `全局删除` |
 | **bili_global_list** | (无) | **[管理员]** 以卡片图片形式查看所有会话的订阅情况。 | `全局列表` |
 | **bili_global_sub** | `<SID> <B站UID> [过滤器...]` | **[管理员]** 为指定会话（UMO）添加对 UP 主的订阅。建议以「」包裹SID，形如`/bili_global_sub 「QQ 12345:FriendMessage:67890」 123456` | `全局订阅` |
+| **bili_clear** | `[SID]` | **[管理员]** 清空所有订阅；带可选 `SID` 参数时仅清空指定会话的订阅。 | `清空订阅` |
 | **bili_sub_test** | `<B站UID>` | 测试订阅功能。返回指定 UID 最新一条未被过滤的动态并渲染为图片（不受已推送状态影响），不保存订阅信息。 | `订阅测试` |
 | **bili_card_style** | `[样式名]` | **[管理员]** 切换动态卡片渲染样式。不带参数查看可用样式列表。 | `卡片样式` |
 | **bili_login** | (无) | **[管理员]** 获取二维码以登录。仅支持在私聊中触发。 | (无) |
