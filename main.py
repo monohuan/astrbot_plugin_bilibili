@@ -4,7 +4,7 @@ import os
 import re
 import tempfile
 import time
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import *
