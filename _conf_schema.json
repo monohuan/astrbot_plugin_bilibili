@@ -45,7 +45,7 @@
     "img_forward": {
         "description": "img_forward",
         "type": "bool",
-        "hint": "图片转发功能总开关：关闭后任何订阅都不会在多图动态推送时以合并消息附带原图；开启后按各订阅的 img_forward 设置生效。",
+        "hint": "是否启用多图原图合并转发：开启后，当动态图片数大于 1 且推送卡片会裁剪图片时，以合并消息转发该动态的全部原图（原动态的图片，非生成的卡片图片）；是否对某条订阅生效由订阅的图片转发开关（bili_img_forward 等指令）决定。",
         "default": false
     },
     "renderer_template": {
