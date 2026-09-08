@@ -671,7 +671,7 @@ class Main(Star):
             uid_int,
             str(usr_info.get("name", "Unknown")),
             str(usr_info.get("face", "")),
-            note=update_msg if updated else warning,
+            note=warning,
             title=title,
             record=record,
             img_forward=bool(record.img_forward) if record else False,
