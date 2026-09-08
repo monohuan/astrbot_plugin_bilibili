@@ -90,15 +90,7 @@ BILI_HELP_TEXT = """/bili 插件帮助
   bili_card_style [样式名]：查看/切换推送卡片样式（别名：卡片样式）
   bili_help：查看本帮助
 
-🔧 仅管理员
-  bili_login：扫码登录 B 站（私聊）
-  bili_logout：登出并清除凭据
-  bili_global_sub <UMO> <UID> [过滤参数]：为指定会话订阅（别名：全局订阅）
-  bili_global_list：查看全局订阅列表（别名：全局列表）
-  bili_global_del <UMO>：删除指定会话的全部订阅（别名：全局删除）
-  bili_clear [SID]：清空所有/指定会话订阅（别名：清空订阅）
-
-🚫 过滤参数（跟在 bili_sub / bili_global_sub 的 UID 之后）
+🚫 过滤参数（跟在 bili_sub 的 UID 之后）
   类型过滤（命中类型不推送）：
     video=视频  draw=图文  forward=转发
     article=专栏  live=直播

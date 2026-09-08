@@ -232,10 +232,13 @@ class DynamicListener:
             dyn = await self.bili_client.get_latest_dynamics(uid)
         if dyn:
             result_list = self._parse_and_filter_dynamics(dyn, sub_data)
+            # 首次同步保护：订阅刚建立、尚无任何已见动态基线时，只记录不推送，
+            # 避免订阅初始化失败（网络异常/近期动态全被过滤）后首轮轮询补发全部历史动态。
+            first_sync = not sub_data.last and not sub_data.recent_ids
             sent = 0
             for result in reversed(result_list):
                 if result.has_payload():
-                    if sent < self.dynamic_limit:
+                    if not first_sync and sent < self.dynamic_limit:
                         sent += 1
                         await self._handle_new_dynamic(
                             sub_user, result.payload, result.dyn_id, sub_data

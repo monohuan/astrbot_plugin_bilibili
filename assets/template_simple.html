@@ -276,17 +276,17 @@
         display: block;
         border-radius: 4px;
         background-color: #f4f5f7;
-        aspect-ratio: 1; /* 强制图片为正方形 */
+        aspect-ratio: 1; /* 多图强制正方形裁剪 */
     }
 
     /* Grid Configurations */
     .grid-1 { grid-template-columns: 1fr; }
-    .grid-1 img { 
-        max-height: 360px; 
-        object-fit: contain; 
-        background: transparent; 
-        border-radius: 8px; 
-        aspect-ratio: auto; /* 单图不强制正方形 */
+    .grid-1 img {
+        object-fit: contain;
+        background: transparent;
+        border-radius: 8px;
+        aspect-ratio: auto; /* 单图宽度撑满，高度自然延展 */
+        height: auto;
     }
     
     .grid-2 { grid-template-columns: repeat(2, 1fr); }

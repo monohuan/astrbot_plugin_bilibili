@@ -222,12 +222,16 @@ class Main(Star):
         name: str,
         avatar: str,
         note: str = "",
+        title: str = "订阅成功",
+        filter_note: str = "",
     ) -> dict:
         return {
             "uid": str(uid),
             "name": name,
             "avatar": avatar,
             "note": note.strip(),
+            "title": title,
+            "filter_note": filter_note.strip(),
         }
 
     async def _render_sub_success(self, context: dict) -> str | None:
@@ -262,9 +266,13 @@ class Main(Star):
         name = payload.get("name", "")
         uid = payload.get("uid", "")
         note = payload.get("note", "")
-        text = f"订阅成功！UP 主: {name} (UID: {uid})"
+        title = payload.get("title", "") or "订阅成功"
+        filter_note = payload.get("filter_note", "")
+        text = f"{title}！UP 主: {name} (UID: {uid})"
         if note:
             text += f"\n{note}"
+        if filter_note:
+            text += f"\n{filter_note}"
         if self.rai:
             img_path = await self._render_sub_success(payload)
             if img_path:
@@ -492,7 +500,15 @@ class Main(Star):
                 )
 
     @command("bili_sub", alias={"订阅动态"})
-    async def dynamic_sub(self, event: AstrMessageEvent, uid: str, input: GreedyStr):
+    async def dynamic_sub(
+        self, event: AstrMessageEvent, uid: str = "", input: GreedyStr = ""
+    ):
+        uid = (uid or "").strip()
+        if not uid:
+            return MessageEventResult().message(
+                "用法：/bili_sub <B站UID> [过滤参数...]\n"
+                "示例：/bili_sub 100870070 video 抽奖"
+            )
         filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = (
             self._parse_sub_args(input)
         )
@@ -505,7 +521,9 @@ class Main(Star):
 
         sub_user = event.unified_msg_origin
         if not uid.isdigit():
-            return MessageEventResult().message("UID 格式错误")
+            return MessageEventResult().message(
+                "UID 格式错误。用法：/bili_sub <B站UID> [过滤参数...]"
+            )
         uid_int = int(uid)
 
         inherit_filters = False
@@ -534,17 +552,28 @@ class Main(Star):
             rm_sub_users=rm_sub_users,
             inherit_filters=inherit_filters,
         )
-        if updated:
-            if warning:
-                update_msg += warning
-            return MessageEventResult().message(update_msg)
+        if updated and warning:
+            update_msg += warning
+
+        # 首次订阅与更新过滤条件统一走卡片推送，均附带当前过滤规则。
+        title = "订阅已更新" if updated else "订阅成功"
+        record = self.data_manager.get_subscription(sub_user, uid_int)
+        filter_note = self.dynamic_listener._build_filter_note(record)
 
         try:
-            usr_info, msg = await self.bili_client.get_user_info(int(uid))
+            usr_info, msg = await self.bili_client.get_user_info(uid_int)
         except Exception as e:
             logger.error(f"获取用户信息失败: {e}")
+            if updated:
+                return MessageEventResult().message(
+                    "\n".join(x for x in (update_msg, filter_note) if x)
+                )
             return MessageEventResult().message("订阅成功，但获取 UP 主信息失败。")
         if not usr_info:
+            if updated:
+                return MessageEventResult().message(
+                    "\n".join(x for x in (update_msg, filter_note) if x)
+                )
             return MessageEventResult().message(
                 f"订阅成功，但获取 UP 主信息失败: {msg}"
             )
@@ -553,7 +582,9 @@ class Main(Star):
             uid_int,
             str(usr_info.get("name", "Unknown")),
             str(usr_info.get("face", "")),
-            note=warning,
+            note=update_msg if updated else warning,
+            title=title,
+            filter_note=filter_note,
         )
         return await self._send_subscription_result(event, payload)
 
@@ -703,11 +734,16 @@ class Main(Star):
         )
 
     @command("bili_sub_del", alias={"订阅删除"})
-    async def sub_del(self, event: AstrMessageEvent, uid: str):
+    async def sub_del(self, event: AstrMessageEvent, uid: str = ""):
         """删除 bilibili 动态监控"""
         sub_user = event.unified_msg_origin
-        if not uid or not uid.isdigit():
-            return MessageEventResult().message("参数错误，请提供正确的UID。")
+        uid = (uid or "").strip()
+        if not uid:
+            return MessageEventResult().message("用法：/bili_sub_del <B站UID>")
+        if not uid.isdigit():
+            return MessageEventResult().message(
+                "UID 格式错误。用法：/bili_sub_del <B站UID>"
+            )
 
         uid2del = int(uid)
 
@@ -718,7 +754,7 @@ class Main(Star):
 
     @permission_type(PermissionType.ADMIN)
     @command("bili_global_del", alias={"全局删除"})
-    async def global_sub_del(self, event: AstrMessageEvent, raw_args: GreedyStr):
+    async def global_sub_del(self, event: AstrMessageEvent, raw_args: GreedyStr = ""):
         """管理员指令。通过 UMO 删除某一个群聊或者私聊的所有订阅。
         用法: /bili_global_del <UMO>
         UMO 格式: <平台名>:<消息类型>:<会话ID>（平台名可能包含空格，需用「」包裹）
@@ -726,7 +762,7 @@ class Main(Star):
         raw = raw_args.strip()
         if not raw:
             return MessageEventResult().message(
-                "请提供正确的UMO。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
+                "用法：/bili_global_del <UMO>。使用 /sid 指令查看当前会话的 UMO。"
             )
 
         umo = None
@@ -771,7 +807,7 @@ class Main(Star):
 
     @permission_type(PermissionType.ADMIN)
     @command("bili_global_sub", alias={"全局订阅"})
-    async def global_sub_add(self, event: AstrMessageEvent, raw_args: GreedyStr):
+    async def global_sub_add(self, event: AstrMessageEvent, raw_args: GreedyStr = ""):
         """管理员指令。通过 UMO 和 UID 添加某一个用户的所有订阅。
         用法: /bili_global_sub <UMO> <UID> [过滤参数]
         UMO 格式: <平台名>:<消息类型>:<会话ID>（平台名可能包含空格）
@@ -779,7 +815,7 @@ class Main(Star):
         raw = raw_args.strip()
         if not raw:
             return MessageEventResult().message(
-                "请提供正确的UMO与UID。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
+                "用法：/bili_global_sub <UMO> <UID> [过滤参数...]"
             )
 
         umo = None
@@ -914,13 +950,18 @@ class Main(Star):
                         logger.error(f"An error occurred during JSON processing: {e}")
 
     @command("bili_sub_test", alias={"订阅测试"})
-    async def sub_test(self, event: AstrMessageEvent, uid: str):
+    async def sub_test(self, event: AstrMessageEvent, uid: str = ""):
         """测试订阅功能。仅测试获取动态与渲染图片功能，不保存订阅信息。"""
         sub_user = event.unified_msg_origin
+        uid = (uid or "").strip()
+        if not uid:
+            return MessageEventResult().message("用法：/bili_sub_test <B站UID>")
         try:
             uid_int = int(uid)
         except (TypeError, ValueError):
-            return MessageEventResult().message("UID 必须是数字。")
+            return MessageEventResult().message(
+                "UID 格式错误。用法：/bili_sub_test <B站UID>"
+            )
 
         dyn = await self.bili_client.get_latest_dynamics(uid_int)
         if not dyn:
