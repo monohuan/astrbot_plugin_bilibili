@@ -9,6 +9,8 @@ data/
 .vscode/
 .idea/
 
+# 框架工具生成的元数据
+.astrbot-plugin/
 
 # 系统与日志
 .DS_Store
