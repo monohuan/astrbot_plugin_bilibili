@@ -228,12 +228,15 @@ class SubscriptionRecord:
     last_live_start_ts: int = 0
     at_all: bool = False
     at_sub_users: List[str] = field(default_factory=list)
+    # 订阅级多图原图转发开关：None=跟随会话/全局设置，True/False=本订阅强制开/关
+    img_forward: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "SubscriptionRecord":
         uid = _to_int(raw.get("uid"), default=-1)
         if uid < 0:
             raise ValueError(f"invalid uid: {raw.get('uid')}")
+        img_forward_raw = raw.get("img_forward")
         return cls(
             uid=uid,
             last=str(raw.get("last", "") or ""),
@@ -245,6 +248,9 @@ class SubscriptionRecord:
             last_live_start_ts=max(0, _to_int(raw.get("last_live_start_ts", 0))),
             at_all=_to_bool(raw.get("at_all", False)),
             at_sub_users=_to_str_list(raw.get("at_sub_users")),
+            img_forward=(
+                img_forward_raw if isinstance(img_forward_raw, bool) else None
+            ),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -259,22 +265,25 @@ class SubscriptionRecord:
             "last_live_start_ts": self.last_live_start_ts,
             "at_all": self.at_all,
             "at_sub_users": list(self.at_sub_users),
+            "img_forward": self.img_forward,
         }
 
     def update_filters(
         self,
-        filter_types: List[str],
-        filter_regex: List[str],
-        live_atall: bool,
+        filter_types: Optional[List[str]] = None,
+        filter_regex: Optional[List[str]] = None,
+        live_atall: Optional[bool] = None,
         at_all: Optional[bool] = None,
         add_sub_users: Optional[List[str]] = None,
         rm_sub_users: Optional[List[str]] = None,
-        inherit_filters: bool = False,
     ) -> None:
-        if not inherit_filters:
+        """局部更新订阅配置：值为 None 的项保持不变。"""
+        if filter_types is not None:
             self.filter_types = list(filter_types)
+        if filter_regex is not None:
             self.filter_regex = list(filter_regex)
-        self.live_atall = bool(live_atall)
+        if live_atall is not None:
+            self.live_atall = bool(live_atall)
         if at_all is not None:
             self.at_all = bool(at_all)
 

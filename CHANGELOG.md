@@ -1,3 +1,22 @@
+## v1.8.2
+- 图片转发不再有全局强制与会话级开关，只保留订阅级 `img_forward` 字段（订阅级即最终生效值，默认关闭）。
+- 新增插件配置项 `img_forward`（图片转发功能总开关，默认关闭）：关闭时任何订阅都不转发原图，开启后按各订阅设置生效。
+- `bili_img_forward on|off` 改为批量开关**当前会话所有订阅**的图片转发；移除 `status`。
+- `bili_img_forward_global <UMO> on|off` 改为批量开关**指定会话所有订阅**的图片转发（管理员）；移除全局强制与 `clear`。
+- `bili_help` 文案重排：过滤参数中列出 `img_forward`，「局部更新」独立小节。
+
+## v1.8.1
+- 图片转发支持订阅级设置：`bili_sub` 新增 `img_forward=on|off|clear` 参数（别名可用：`img_forward=1/0/开/关/清除` 等），随订阅持久化并单独生效；`clear` 恢复跟随会话/全局设置。生效优先级：全局强制 > 订阅级覆盖 > 会话级 > 默认关闭。
+- `bili_img_forward status` 改为逐条列出本会话每个订阅的图片转发最终生效结果（仅显示开启/关闭，不再展示层级来源）。
+- 订阅更新改为局部更新（patch 语义）：只改动指令中给出的项，其余保持不变，无需重写全部规则。
+  - `type=video,draw` 覆盖类型过滤；`type=` 清空；`+type=video` 追加；`-type=video` 移除。
+  - 单类型开关：`lottery=1/0`（或 true/false/on/off，留空视为关）单独增删某类型。
+  - `regex=a,b` 覆盖正则关键词；`regex=` 清空；`+regex=xx` 追加；`-regex=xx` 移除。
+  - `live_atall=on|off` 显式开关直播@全体；不再出现"更新时未写 live_atall 导致被静默关闭"的问题。
+  - 旧的裸参数写法（如 `/bili_sub 123 video 抽奖`）仍然有效，行为不变（整体覆盖类型与正则）。
+- 视频列表时间 chip 去掉「发布」后缀，仅显示日期（YYYY-MM-DD）。
+- `bili_help`、README、CHANGELOG 同步更新上述用法。
+
 ## v1.8.0
 - 多图原图合并转发：动态含多张图片（推送卡片会裁剪）时，可在卡片后以合并消息附带原图。新增会话级开关 `bili_img_forward on|off`（别名：图片转发）；管理员可用 `bili_img_forward_global on|off|clear`（别名：全局图片转发）强制所有会话的开关状态。
 - `bili_sub_list` / `bili_global_list` 会话区块显示「图片转发」开关状态，被全局强制时附加标注。

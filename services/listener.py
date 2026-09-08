@@ -637,10 +637,18 @@ class DynamicListener:
         sub_user: str,
         payload: RenderPayload,
         dyn_id: Optional[str],
+        sub_data: Optional[SubscriptionRecord] = None,
     ) -> None:
-        """开关开启且动态含多图（推送卡片会裁剪）时，以合并消息补发原图。"""
+        """动态含多图（推送卡片会裁剪）时，以合并消息补发原图。
+
+        需同时满足：插件配置 img_forward 总开关开启，且该订阅记录的
+        img_forward 字段为 True（bili_img_forward / bili_img_forward_global /
+        bili_sub img_forward= 均批量写入该字段）。
+        """
         try:
-            if not self.data_manager.get_img_forward_enabled(sub_user):
+            if not self.img_forward_enabled:
+                return
+            if not (sub_data.img_forward if sub_data else False):
                 return
             urls = self._collect_original_images(payload)
             if len(urls) <= 1:
@@ -771,7 +779,9 @@ class DynamicListener:
                     f"dyn_id={dyn_id} error={e}"
                 )
             else:
-                await self._maybe_send_original_images(sub_user, payload, dyn_id)
+                await self._maybe_send_original_images(
+                    sub_user, payload, dyn_id, sub_data
+                )
             return
 
         logger.warning(

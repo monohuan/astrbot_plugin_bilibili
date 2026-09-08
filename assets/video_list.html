@@ -166,7 +166,9 @@
                 <div class="title">{{ v.title }}</div>
                 <div class="meta">
                     <span class="author">{{ v.author }}</span>
-                    {% if v.pubdate %}<span class="chip">{{ v.pubdate }} 发布</span>{% endif %}
+                    {% if v.pubdate %}<span class="chip">{{ v.pubdate }}</span>{% endif %}
+                </div>
+                <div class="meta">
                     {% if v.play != '未知' %}<span class="chip highlight">{{ v.play }} 播放</span>{% endif %}
                     {% if v.danmaku != '未知' %}<span class="chip">{{ v.danmaku }} 弹幕</span>{% endif %}
                 </div>

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from astrbot.api import logger
 from astrbot.api.star import StarTools
 
-from .constant import DATA_PATH, DEFAULT_CFG, RECENT_DYNAMIC_CACHE
+from .constant import DATA_PATH, DEFAULT_CFG, RECENT_DYNAMIC_CACHE, UNSET
 from .models import SubscriptionRecord
 
 
@@ -82,57 +82,24 @@ class DataManager:
     def _normalize_runtime_fields(self) -> None:
         parsed_ts = int(self.data.get("last_success_sub_notify_ts", 0))
         self.data["last_success_sub_notify_ts"] = max(parsed_ts, 0)
-        self._normalize_img_forward()
 
-    def _normalize_img_forward(self) -> None:
-        """规范多图原图转发开关数据：{"sessions": {sub_user: bool}, "global": bool|None}。"""
-        raw = self.data.get("img_forward")
-        if not isinstance(raw, dict):
-            self.data["img_forward"] = {"sessions": {}, "global": None}
-            return
-        sessions = raw.get("sessions")
-        if not isinstance(sessions, dict):
-            sessions = {}
-        normalized_sessions = {
-            str(k): bool(v) for k, v in sessions.items() if isinstance(v, bool)
-        }
-        global_flag = raw.get("global")
-        if global_flag not in (None, True, False):
-            global_flag = None
-        self.data["img_forward"] = {
-            "sessions": normalized_sessions,
-            "global": global_flag,
-        }
+    async def set_img_forward_for_user(
+        self, sub_user: str, enabled: bool
+    ) -> int:
+        """批量设置某会话全部订阅的多图原图转发（写订阅级 img_forward 字段）。
 
-    def get_img_forward_global(self) -> Optional[bool]:
-        """全局强制开关：True/False 强制所有会话，None 表示不强制。"""
-        return self.data.get("img_forward", {}).get("global")
-
-    def get_img_forward_enabled(self, sub_user: str) -> bool:
-        """解析某会话的多图原图转发开关（全局强制优先，会话级默认关闭）。"""
-        global_flag = self.get_img_forward_global()
-        if global_flag is not None:
-            return bool(global_flag)
-        sessions = self.data.get("img_forward", {}).get("sessions", {})
-        return bool(sessions.get(sub_user, False))
-
-    async def set_img_forward_session(
-        self, sub_user: str, enabled: Optional[bool]
-    ) -> None:
-        """设置/清除（None）某会话的多图原图转发开关。"""
-        store = self.data.setdefault("img_forward", {"sessions": {}, "global": None})
-        sessions = store.setdefault("sessions", {})
-        if enabled is None:
-            sessions.pop(sub_user, None)
-        else:
-            sessions[sub_user] = bool(enabled)
-        await self.save()
-
-    async def set_img_forward_global(self, enabled: Optional[bool]) -> None:
-        """设置/清除（None）全局强制开关。"""
-        store = self.data.setdefault("img_forward", {"sessions": {}, "global": None})
-        store["global"] = enabled
-        await self.save()
+        返回实际改动的订阅条数。
+        """
+        subs = self.get_subscriptions_by_user(sub_user) or []
+        flag = bool(enabled)
+        changed = 0
+        for sub in subs:
+            if sub.img_forward is not flag:
+                sub.img_forward = flag
+                changed += 1
+        if changed:
+            await self.save()
+        return changed
 
     @staticmethod
     def _write_text(path: str, content: str) -> None:
@@ -191,6 +158,7 @@ class DataManager:
             existing.last_live_start_ts = sub_data.last_live_start_ts
             existing.at_all = sub_data.at_all
             existing.at_sub_users = list(sub_data.at_sub_users)
+            existing.img_forward = sub_data.img_forward
         else:
             all_subs[sub_user].append(sub_data)
         await self.save()
@@ -201,14 +169,17 @@ class DataManager:
         uid: int,
         filter_types: List[str],
         filter_regex: List[str],
-        live_atall: bool,
+        live_atall: Optional[bool] = None,
         at_all: Optional[bool] = None,
         add_sub_users: Optional[List[str]] = None,
         rm_sub_users: Optional[List[str]] = None,
-        inherit_filters: bool = False,
+        img_forward: Any = UNSET,
     ):
         """
         更新一个已存在的订阅的过滤条件及 @ 提醒设置。
+
+        live_atall 为 None 时保持原值不变；
+        img_forward 为 UNSET 时不变，None 时清除订阅级覆盖，True/False 时强制设置。
         """
         sub = self.get_subscription(sub_user, uid)
         if sub:
@@ -219,8 +190,9 @@ class DataManager:
                 at_all=at_all,
                 add_sub_users=add_sub_users,
                 rm_sub_users=rm_sub_users,
-                inherit_filters=inherit_filters,
             )
+            if img_forward is not UNSET:
+                sub.img_forward = None if img_forward is None else bool(img_forward)
             await self.save()
             return True
         return False

@@ -1,4 +1,19 @@
+# Python
 __pycache__/
 *.pyc
+
+# 运行时数据
 data/
-.vscode
+
+# IDE / 编辑器
+.vscode/
+.idea/
+
+# 框架工具生成的元数据
+.astrbot-plugin/
+
+# 系统与日志
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log

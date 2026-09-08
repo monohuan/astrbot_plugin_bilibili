@@ -31,6 +31,10 @@ AT_ALL_OPTION = "at_all"
 AT_SUB_OPTION = "at_sub"
 UNAT_SUB_OPTION = "unat_sub"
 VALID_SUB_OPTIONS = {LIVE_ATALL_OPTION, AT_ALL_OPTION, AT_SUB_OPTION, UNAT_SUB_OPTION}
+
+# 三态开关的"未指定"哨兵（用于订阅级 img_forward 等可选配置）。
+# 注意与 None 的区别：None 表示显式清除订阅级覆盖（恢复跟随会话/全局），UNSET 表示本次未提供该项。
+UNSET = object()
 DATA_PATH = "data/astrbot_plugin_bilibili.json"
 DEFAULT_CFG = {
     "bili_sub_list": {},  # sub_user -> [{"uid": "uid", "last": "last_dynamic_id", ...}]
@@ -95,12 +99,11 @@ FILTER_TYPE_LABELS = {
 
 BILI_HELP_TEXT = """/bili 插件帮助
 📦 订阅相关
-  bili_sub <UID> [过滤参数]：订阅UP主动态（别名：订阅动态）
-  bili_sub_list：查看当前会话订阅列表（别名：订阅列表）
-  bili_sub_del <UID>：删除订阅（别名：订阅删除）
-  bili_card_style [样式名]：查看/切换推送卡片样式（别名：卡片样式）
-  bili_img_forward on|off|status：多图动态推送时是否以合并消息附带原图（别名：图片转发），
-    状态会显示在订阅列表与订阅成功/更新卡片中
+  bili_sub <UID> [过滤参数]：订阅UP主动态
+  bili_sub_list：查看当前会话订阅列表
+  bili_sub_del <UID>：删除订阅
+  bili_card_style [样式名]：查看/切换推送卡片样式
+  bili_img_forward on|off：多图动态推送时是否以合并消息附带原图
   bili_help：查看本帮助
 
 🚫 过滤参数（跟在 bili_sub 的 UID 之后）
@@ -108,9 +111,16 @@ BILI_HELP_TEXT = """/bili 插件帮助
     video=视频  draw=图文  forward=转发
     article=专栏  live=直播
     lottery=抽奖  forward_lottery=转发抽奖
+    img_forward=裁切图片是否合并转发
   @ 选项：
     live_atall=开播时@全体  at_all=每条推送@全体
     at_sub=开播时@订阅者  unat_sub=取消@订阅者
   正则过滤：其余参数视为正则，动态文本命中则不推送
 
-示例：/bili_sub 12345 video draw 抽奖|中奖 at_all"""
+⚙️ 局部更新（更新订阅时只改动给出的项，其余保持不变）
+  type=video,draw 覆盖类型    type= 清空类型
+  +type=video 追加类型        -type=video 移除类型
+  lottery=1 加抽奖过滤        lottery=0 去掉抽奖过滤（单类型开关）
+  regex=a,b 覆盖关键词        regex= 清空关键词
+  +regex=关键词 追加          -regex=关键词 移除
+  live_atall=on|off 开关直播@全体"""

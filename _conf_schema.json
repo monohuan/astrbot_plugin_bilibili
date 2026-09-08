@@ -42,6 +42,12 @@
         "hint": "是否以图片形式渲染动态与直播推送",
         "default": true
     },
+    "img_forward": {
+        "description": "img_forward",
+        "type": "bool",
+        "hint": "图片转发功能总开关：关闭后任何订阅都不会在多图动态推送时以合并消息附带原图；开启后按各订阅的 img_forward 设置生效。",
+        "default": false
+    },
     "renderer_template": {
         "description": "renderer_template",
         "type": "string",

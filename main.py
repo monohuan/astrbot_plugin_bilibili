@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
 from astrbot.api import AstrBotConfig, logger
@@ -186,35 +187,111 @@ class Main(Star):
         self._last_notify_write_ts = now_ts
         await self.data_manager.set_last_success_sub_notify_ts(now_ts)
 
+    @dataclass
+    class ParsedSubArgs:
+        """bili_sub 过滤参数解析结果（patch 语义：未提供的项保持不变）。"""
+
+        type_ops: List[Tuple[str, List[str]]] = field(default_factory=list)
+        regex_ops: List[Tuple[str, List[str]]] = field(default_factory=list)
+        live_atall: Optional[bool] = None
+        at_all: bool = False
+        at_sub: bool = False
+        unat_sub: bool = False
+        # UNSET=未指定 / True / False / None(clear，清除订阅级覆盖)
+        img_forward: Any = UNSET
+
     @staticmethod
-    def _parse_sub_args(
-        input_text: GreedyStr,
-    ) -> tuple[List[str], List[str], bool, bool, bool, bool]:
+    def _parse_sub_args(input_text: GreedyStr) -> "Main.ParsedSubArgs":
+        spec = Main.ParsedSubArgs()
         args = input_text.strip().split(" ") if input_text.strip() else []
-        filter_types: List[str] = []
-        filter_regex: List[str] = []
-        live_atall = False
-        at_all = False
-        at_sub = False
-        unat_sub = False
+        bare_types: List[str] = []
+        bare_regex: List[str] = []
+        has_bare = False
+
+        def _split_values(v: str) -> List[str]:
+            return [x.strip() for x in v.split(",") if x.strip()]
 
         for arg in args:
+            # 键值语法：type=/regex=/img_forward=/live_atall=、单类型开关（如 lottery=0）
+            if "=" in arg and not arg.startswith(("+", "-")):
+                key, _, value = arg.partition("=")
+                v = value.strip()
+                low = v.lower()
+                if key == "img_forward":
+                    if low in ("on", "true", "1", "yes", "开", "开启"):
+                        spec.img_forward = True
+                    elif low in ("off", "false", "0", "no", "关", "关闭"):
+                        spec.img_forward = False
+                    elif low in ("clear", "none", "default", "follow", "清除", "默认"):
+                        spec.img_forward = None
+                    continue
+                if key == "live_atall":
+                    spec.live_atall = low not in ("off", "false", "0", "no", "关", "关闭")
+                    continue
+                if key == "type":
+                    spec.type_ops.append(("set", _split_values(v)))
+                    continue
+                if key == "regex":
+                    spec.regex_ops.append(("set", _split_values(v)))
+                    continue
+                if key in VALID_FILTER_TYPES:
+                    # 单类型开关：lottery=1 追加 / lottery=0 移除
+                    if low in ("off", "false", "0", "no", "", "关", "关闭"):
+                        spec.type_ops.append(("remove", [key]))
+                    else:
+                        spec.type_ops.append(("add", [key]))
+                    continue
+            # 前缀语法：+type= / -type= / +regex= / -regex=
+            if arg.startswith(("+", "-")) and "=" in arg:
+                key, _, value = arg[1:].partition("=")
+                vals = _split_values(value.strip())
+                op = "add" if arg.startswith("+") else "remove"
+                if key == "type":
+                    spec.type_ops.append((op, vals))
+                    continue
+                if key == "regex":
+                    spec.regex_ops.append((op, vals))
+                    continue
+            # 裸 img_forward（不带=）等同于 img_forward=on，
+            # 防止它落入旧裸参数分支被误当作正则并整体覆盖过滤列表
+            if arg == "img_forward":
+                spec.img_forward = True
+                continue
+            # 标志位语法
             if arg in VALID_SUB_OPTIONS:
                 if arg == LIVE_ATALL_OPTION:
-                    live_atall = True
+                    spec.live_atall = True
                 elif arg == AT_ALL_OPTION:
-                    at_all = True
+                    spec.at_all = True
                 elif arg == AT_SUB_OPTION:
-                    at_sub = True
+                    spec.at_sub = True
                 elif arg == UNAT_SUB_OPTION:
-                    unat_sub = True
+                    spec.unat_sub = True
                 continue
+            # 裸参数（旧语法）：类型 or 正则，出现即整体覆盖
             if arg in VALID_FILTER_TYPES:
-                filter_types.append(arg)
+                bare_types.append(arg)
             else:
-                filter_regex.append(arg)
+                bare_regex.append(arg)
+            has_bare = True
 
-        return filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub
+        # 旧语法兜底：裸参数整体覆盖类型与正则两个列表（优先于键值语法，按出现顺序最后应用）
+        if has_bare:
+            spec.type_ops.append(("set", bare_types))
+            spec.regex_ops.append(("set", bare_regex))
+        return spec
+
+    @staticmethod
+    def _apply_list_op(
+        base: List[str], op: str, values: List[str]
+    ) -> List[str]:
+        if op == "set":
+            return list(values)
+        if op == "add":
+            return base + [v for v in values if v not in base]
+        if op == "remove":
+            return [x for x in base if x not in values]
+        return list(base)
 
     @staticmethod
     def _build_subscription_payload(
@@ -305,27 +382,38 @@ class Main(Star):
         self,
         sub_user: str,
         uid_int: int,
-        filter_types: List[str],
-        filter_regex: List[str],
-        live_atall: bool,
-        at_all: bool | None = None,
+        spec: "Main.ParsedSubArgs",
         add_sub_users: List[str] | None = None,
         rm_sub_users: List[str] | None = None,
-        inherit_filters: bool = False,
     ) -> Tuple[bool, str]:
+        # patch 语义：基于现有记录解析过滤列表，未提供的项保持不变
+        existing = self.data_manager.get_subscription(sub_user, uid_int)
+        base_types = list(existing.filter_types) if existing else []
+        base_regex = list(existing.filter_regex) if existing else []
+
+        filter_types = list(base_types)
+        for op, values in spec.type_ops:
+            filter_types = self._apply_list_op(filter_types, op, values)
+        filter_regex = list(base_regex)
+        for op, values in spec.regex_ops:
+            filter_regex = self._apply_list_op(filter_regex, op, values)
+
         result = await self.subscription_service.add_or_update(
             sub_user,
             uid_int,
             filter_types,
             filter_regex,
-            live_atall,
-            at_all=at_all,
+            spec.live_atall,
+            at_all=spec.at_all if spec.at_all else None,
             add_sub_users=add_sub_users,
             rm_sub_users=rm_sub_users,
-            inherit_filters=inherit_filters,
+            img_forward=spec.img_forward,
         )
         if result.updated:
-            option_desc = "开启" if live_atall else "关闭"
+            record = self.data_manager.get_subscription(sub_user, uid_int)
+            option_desc = (
+                "开启" if record and record.live_atall else "关闭"
+            )
             return True, f"该动态已订阅，已更新过滤条件。直播@全体: {option_desc}"
         return False, ""
 
@@ -522,13 +610,13 @@ class Main(Star):
         if not uid:
             return MessageEventResult().message(
                 "用法：/bili_sub <B站UID> [过滤参数...]\n"
-                "示例：/bili_sub 100870070 video 抽奖"
+                "更新订阅时只改动给出的项，其余保持不变。\n"
+                "示例：/bili_sub 100870070 video 抽奖\n"
+                "      /bili_sub 100870070 +regex=新词 img_forward=on"
             )
-        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = (
-            self._parse_sub_args(input)
-        )
+        spec = self._parse_sub_args(input)
 
-        if (at_all or live_atall) and not event.is_admin():
+        if (spec.at_all or spec.live_atall) and not event.is_admin():
             if event.role not in ("admin", "owner", "founder"):
                 return MessageEventResult().message(
                     "权限不足：只有管理员可以设置 @全体成员 相关选项。"
@@ -541,15 +629,13 @@ class Main(Star):
             )
         uid_int = int(uid)
 
-        inherit_filters = False
-        if not filter_types and not filter_regex and (at_all or at_sub or unat_sub):
-            inherit_filters = True
-
-        add_sub_users = [event.get_sender_id()] if at_sub else None
-        rm_sub_users = [event.get_sender_id()] if unat_sub else None
+        add_sub_users = [event.get_sender_id()] if spec.at_sub else None
+        rm_sub_users = [event.get_sender_id()] if spec.unat_sub else None
 
         warning = ""
-        if (at_all or live_atall) and getattr(event, "get_group_id", lambda: None)():
+        if (spec.at_all or spec.live_atall) and getattr(
+            event, "get_group_id", lambda: None
+        )():
             permit_atall = await self.dynamic_listener._check_atall_permission(
                 sub_user, True
             )
@@ -557,15 +643,7 @@ class Main(Star):
                 warning = "\n⚠️ 注意：机器人目前在本会话无 @全体成员 的权限，此项设置可能不会生效（请给予机器人管理员权限）。"
 
         updated, update_msg = await self._apply_subscription(
-            sub_user,
-            uid_int,
-            filter_types,
-            filter_regex,
-            live_atall,
-            at_all=at_all if at_all else None,
-            add_sub_users=add_sub_users,
-            rm_sub_users=rm_sub_users,
-            inherit_filters=inherit_filters,
+            sub_user, uid_int, spec, add_sub_users, rm_sub_users
         )
         if updated and warning:
             update_msg += warning
@@ -595,7 +673,7 @@ class Main(Star):
             note=update_msg if updated else warning,
             title=title,
             record=record,
-            img_forward=self.data_manager.get_img_forward_enabled(sub_user),
+            img_forward=bool(record.img_forward) if record else False,
         )
         return await self._send_subscription_result(event, payload)
 
@@ -746,9 +824,10 @@ class Main(Star):
         if not subs:
             return MessageEventResult().message("无订阅")
 
-        session_img_forward = self.data_manager.get_img_forward_enabled(sub_user)
         items = [
-            await self._build_sub_list_item(s, img_forward=session_img_forward)
+            await self._build_sub_list_item(
+                s, img_forward=bool(s.img_forward)
+            )
             for s in subs
         ]
         sessions = [
@@ -885,34 +964,18 @@ class Main(Star):
             return MessageEventResult().message(
                 "请提供正确的UMO与UID。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
             )
-        filter_types, filter_regex, live_atall, at_all, at_sub, unat_sub = (
-            self._parse_sub_args(input_str)
-        )
+        spec = self._parse_sub_args(input_str)
         uid_int = int(uid)
 
-        inherit_filters = False
-        if not filter_types and not filter_regex and (at_all or at_sub or unat_sub):
-            inherit_filters = True
-
         warning = ""
-        if at_all or live_atall:
+        if spec.at_all or spec.live_atall:
             permit_atall = await self.dynamic_listener._check_atall_permission(
                 umo, True
             )
             if not permit_atall:
                 warning = "\n⚠️ 注意：机器人目前在目标会话无 @全体成员 的权限，此项设置可能不会生效（请检查机器人权限）。"
 
-        updated, update_msg = await self._apply_subscription(
-            umo,
-            uid_int,
-            filter_types,
-            filter_regex,
-            live_atall,
-            at_all=True if at_all else None,
-            add_sub_users=None,
-            rm_sub_users=None,
-            inherit_filters=inherit_filters,
-        )
+        updated, update_msg = await self._apply_subscription(umo, uid_int, spec)
         if updated:
             if warning:
                 update_msg += warning
@@ -932,9 +995,10 @@ class Main(Star):
         sessions = []
         total = 0
         for sub_user, sub_list in all_subs.items():
-            session_img_forward = self.data_manager.get_img_forward_enabled(sub_user)
             items = [
-                await self._build_sub_list_item(s, img_forward=session_img_forward)
+                await self._build_sub_list_item(
+                    s, img_forward=bool(s.img_forward)
+                )
                 for s in sub_list
             ]
             total += len(items)
@@ -1360,36 +1424,25 @@ class Main(Star):
     async def img_forward_toggle(
         self, event: AstrMessageEvent, raw_args: GreedyStr = ""
     ):
-        """开关当前会话：多图动态推送时以合并消息附带原图。
-        用法: /bili_img_forward on|off|status
+        """批量开关当前会话所有订阅：多图动态推送时以合并消息附带原图。
+        用法: /bili_img_forward on|off
         """
         sub_user = event.unified_msg_origin
         arg = (raw_args or "").strip().lower()
-        if arg in ("on", "开", "开启"):
-            await self.data_manager.set_img_forward_session(sub_user, True)
+        if arg not in ("on", "开", "开启", "off", "关", "关闭"):
+            return MessageEventResult().message("用法：/bili_img_forward on|off")
+        enabled = arg in ("on", "开", "开启")
+        changed = await self.data_manager.set_img_forward_for_user(
+            sub_user, enabled
+        )
+        subs = self.data_manager.get_subscriptions_by_user(sub_user) or []
+        if not subs:
             return MessageEventResult().message(
-                "已开启：多图动态推送时将以合并消息附带原图。"
+                "本会话暂无订阅，图片转发跟随每条订阅设置（可用 /bili_sub <UID> img_forward=on 单独开启）。"
             )
-        if arg in ("off", "关", "关闭"):
-            await self.data_manager.set_img_forward_session(sub_user, False)
-            return MessageEventResult().message(
-                "已关闭：多图动态推送不再附带原图合并消息。"
-            )
-        if arg not in ("", "status", "状态"):
-            return MessageEventResult().message(
-                "用法：/bili_img_forward on|off|status"
-            )
-        global_flag = self.data_manager.get_img_forward_global()
-        enabled = self.data_manager.get_img_forward_enabled(sub_user)
-        if global_flag is None:
-            force_desc = "未强制（由各会话自行设置）"
-        elif global_flag:
-            force_desc = "强制开启"
-        else:
-            force_desc = "强制关闭"
+        state = "开启" if enabled else "关闭"
         return MessageEventResult().message(
-            f"当前会话多图原图转发：{'开启' if enabled else '关闭'}\n"
-            f"全局状态：{force_desc}"
+            f"已{state}本会话 {changed} 条订阅的多图原图转发。"
         )
 
     @permission_type(PermissionType.ADMIN)
@@ -1397,27 +1450,48 @@ class Main(Star):
     async def img_forward_global(
         self, event: AstrMessageEvent, raw_args: GreedyStr = ""
     ):
-        """管理员指令。强制所有会话的多图原图转发开关。
-        用法: /bili_img_forward_global on|off|clear
+        """管理员指令。批量修改指定会话所有订阅的多图原图转发开关。
+        用法: /bili_img_forward_global <UMO> on|off
+        UMO 格式: <平台名>:<消息类型>:<会话ID>（平台名可能包含空格，需用「」包裹）
         """
-        arg = (raw_args or "").strip().lower()
-        if arg in ("on", "开", "开启"):
-            await self.data_manager.set_img_forward_global(True)
+        raw = (raw_args or "").strip()
+        if not raw:
             return MessageEventResult().message(
-                "已全局强制开启：所有会话的多图动态都会附带原图合并消息。"
+                "用法：/bili_img_forward_global <UMO> on|off。"
+                "使用 /sid 指令查看当前会话的 UMO。"
             )
-        if arg in ("off", "关", "关闭"):
-            await self.data_manager.set_img_forward_global(False)
+
+        umo = None
+        action = ""
+        if raw.startswith("「"):
+            end_idx = raw.find("」")
+            if end_idx == -1:
+                return MessageEventResult().message(
+                    "UMO 格式错误：请使用「」包裹 UMO，例如: "
+                    "「QQ 12345:GroupMessage:67890」 on"
+                )
+            umo = raw[1:end_idx]
+            rest = raw[end_idx + 1 :].strip().lower()
+            action = rest.split()[0] if rest.split() else ""
+        else:
+            parts = raw.split()
+            if len(parts) >= 2:
+                umo = parts[0]
+                action = parts[1].lower()
+
+        if not umo or not is_valid_umo(umo):
             return MessageEventResult().message(
-                "已全局强制关闭：所有会话的多图动态都不附带原图合并消息。"
+                "请提供正确的UMO。使用 /sid 指令查看当前会话的 UMO 或参考 WebUI-自定义规则。"
             )
-        if arg in ("clear", "清除", "取消", "none"):
-            await self.data_manager.set_img_forward_global(None)
+        if action not in ("on", "开", "开启", "off", "关", "关闭"):
             return MessageEventResult().message(
-                "已清除全局强制，恢复各会话自行设置（默认关闭）。"
+                "用法：/bili_img_forward_global <UMO> on|off"
             )
+        enabled = action in ("on", "开", "开启")
+        changed = await self.data_manager.set_img_forward_for_user(umo, enabled)
+        state = "开启" if enabled else "关闭"
         return MessageEventResult().message(
-            "用法：/bili_img_forward_global on|off|clear"
+            f"已{state}会话 {umo} 的 {changed} 条订阅的多图原图转发。"
         )
 
     async def terminate(self):
