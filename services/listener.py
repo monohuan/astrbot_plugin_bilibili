@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import re
 import time
 import traceback
@@ -21,6 +22,7 @@ from ..core.data_manager import DataManager
 from ..core.models import DynamicParseResult, RenderPayload, SubscriptionRecord
 from ..core.utils import (
     create_qrcode,
+    format_bili_timestamp,
     image_to_base64,
     is_height_valid,
     render_text_to_plain,
@@ -38,6 +40,16 @@ PLAIN_PUSH_ACTIONS = {
     "DYNAMIC_TYPE_DRAW": "发布了新图文动态",
     "DYNAMIC_TYPE_FORWARD": "转发了新动态",
     "DYNAMIC_TYPE_WORD": "发布了新动态",
+}
+# 过滤类型 -> 中文标签（用于推送卡片上的过滤规则展示）
+FILTER_TYPE_LABELS = {
+    "video": "视频",
+    "draw": "图文",
+    "forward": "转发",
+    "article": "专栏",
+    "live": "直播",
+    "lottery": "抽奖",
+    "forward_lottery": "转发抽奖",
 }
 VIDEO_BODY_PREFIX = "投稿了新视频"
 GROUP_MESSAGE_TYPE = "GroupMessage"
@@ -614,6 +626,46 @@ class DynamicListener:
         while len(self.render_cache) > self.render_cache_limit:
             self.render_cache.popitem(last=False)
 
+    @staticmethod
+    def _build_filter_note(sub_data: Optional[SubscriptionRecord]) -> str:
+        """构建展示在推送卡片上的过滤规则说明，无过滤规则时返回空字符串。"""
+        if not sub_data:
+            return ""
+        parts: List[str] = []
+        type_labels = [
+            FILTER_TYPE_LABELS[t]
+            for t in sub_data.filter_types
+            if t in FILTER_TYPE_LABELS
+        ]
+        if type_labels:
+            parts.append("已开启过滤：" + "、".join(type_labels))
+        if sub_data.filter_regex:
+            parts.append("正则：" + "；".join(sub_data.filter_regex))
+        return "　".join(parts)
+
+    @staticmethod
+    def _build_filter_cache_suffix(sub_data: Optional[SubscriptionRecord]) -> str:
+        """基于订阅过滤规则生成缓存后缀，保证不同过滤规则的订阅者不共用同一张渲染图。"""
+        if not sub_data:
+            return ""
+        if not sub_data.filter_types and not sub_data.filter_regex:
+            return ""
+        raw = "|".join(
+            [
+                ",".join(sorted(sub_data.filter_types)),
+                "||".join(sub_data.filter_regex),
+            ]
+        )
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()[:10]
+
+    def _resolve_render_cache_key(
+        self, dyn_id: Optional[str], sub_data: Optional[SubscriptionRecord]
+    ) -> Optional[str]:
+        if not dyn_id:
+            return None
+        suffix = self._build_filter_cache_suffix(sub_data)
+        return f"{dyn_id}:{suffix}" if suffix else dyn_id
+
     async def _handle_new_dynamic(
         self,
         sub_user: str,
@@ -625,11 +677,17 @@ class DynamicListener:
         if not payload:
             return
 
+        # 注入该订阅生效的过滤规则说明（展示在推送卡片上）
+        filter_note = self._build_filter_note(sub_data)
+        if filter_note:
+            payload.filter_note = filter_note
+
+        cache_key = self._resolve_render_cache_key(dyn_id, sub_data)
         permit_atall = await self._check_atall_permission(
             sub_user, bool(sub_data and sub_data.at_all)
         )
 
-        cached = self.render_cache.get(dyn_id) if dyn_id else None
+        cached = self.render_cache.get(cache_key) if cache_key else None
         if cached:
             logger.debug(f"动态推送命中缓存: dyn_id={dyn_id} sub_user={sub_user}")
             chain_to_send = self._add_at_components(
@@ -657,7 +715,7 @@ class DynamicListener:
                 ls = self._compose_template_push(payload)
             else:
                 ls = self._compose_plain_push(payload)
-            self._cache_render(dyn_id, ls, send_node_flag)
+            self._cache_render(cache_key, ls, send_node_flag)
             chain_to_send = self._add_at_components(
                 list(ls), sub_data, permit_atall=permit_atall
             )
@@ -679,7 +737,7 @@ class DynamicListener:
                     f"dyn_id={dyn_id} error={e}"
                 )
             finally:
-                self._cache_render(dyn_id, ls, send_node_flag)
+                self._cache_render(cache_key, ls, send_node_flag)
             return
 
         img_path = await self.renderer.render_dynamic(payload)
@@ -691,7 +749,7 @@ class DynamicListener:
                 timestamp = int(time.time())
                 filename = f"bilibili_dynamic_{timestamp}.jpg"
                 ls = [File(file=img_path, name=filename)]
-            self._cache_render(dyn_id, ls, send_node_flag)
+            self._cache_render(cache_key, ls, send_node_flag)
             chain_to_send = self._add_at_components(
                 list(ls), sub_data, permit_atall=permit_atall
             )
@@ -837,7 +895,9 @@ class DynamicListener:
         return is_live_now, is_live_started, is_live_ended
 
     @staticmethod
-    def _build_live_payload(live_room: Dict[str, Any], text: str) -> RenderPayload:
+    def _build_live_payload(
+        live_room: Dict[str, Any], text: str, live_start_ts: int = 0
+    ) -> RenderPayload:
         room_id = int(live_room.get("room_id", 0) or 0)
         link = f"https://live.bilibili.com/{room_id}"
         return RenderPayload(
@@ -849,6 +909,8 @@ class DynamicListener:
             qrcode=create_qrcode(link),
             image_urls=[str(live_room.get("cover_from_user", "") or "")],
             text=text,
+            label="直播动态",
+            pub_time=format_bili_timestamp(live_start_ts),
         )
 
     async def _send_live_payload(
@@ -973,9 +1035,13 @@ class DynamicListener:
 
         user_name = str(live_room.get("uname", "Unknown") or "Unknown")
         text = ""
+        live_start_ts = 0
         if is_live_started:
             if current_live_start_ts > 0:
                 sub_data.last_live_start_ts = current_live_start_ts
+            live_start_ts = current_live_start_ts or int(
+                sub_data.last_live_start_ts or 0
+            )
             text = f"📣 你订阅的UP 「{user_name}」 开播了！"
             await self.data_manager.update_live_status(sub_user, sub_data.uid, True)
         if is_live_ended:
@@ -995,7 +1061,7 @@ class DynamicListener:
             sub_data.last_live_start_ts = 0
             await self.data_manager.update_live_status(sub_user, sub_data.uid, False)
         if text:
-            payload = self._build_live_payload(live_room, text)
+            payload = self._build_live_payload(live_room, text, live_start_ts)
             with_atall = await self._check_atall_permission(
                 sub_user,
                 bool(sub_data.live_atall or sub_data.at_all) and is_live_started,

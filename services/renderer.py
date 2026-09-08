@@ -16,7 +16,16 @@ from ..core.constant import (
     get_template_path,
 )
 from ..core.models import RenderPayload
-from ..core.utils import create_qrcode, image_to_base64, parse_rich_text
+from ..core.utils import create_qrcode, format_bili_timestamp, image_to_base64, parse_rich_text
+
+# 动态类型 -> 中文标签（用于卡片上的类型标注）
+DYNAMIC_TYPE_LABELS = {
+    "DYNAMIC_TYPE_AV": "视频动态",
+    "DYNAMIC_TYPE_DRAW": "图文动态",
+    "DYNAMIC_TYPE_WORD": "文字动态",
+    "DYNAMIC_TYPE_FORWARD": "转发动态",
+    "DYNAMIC_TYPE_ARTICLE": "专栏文章",
+}
 
 
 def load_template(style: str) -> str:
@@ -169,12 +178,15 @@ class Renderer:
     @staticmethod
     def _build_base_payload(item: Dict[str, Any]) -> RenderPayload:
         author_module = item.get("modules", {}).get("module_author") or {}
+        item_type = str(item.get("type") or "")
         return RenderPayload(
             banner=image_to_base64(BANNER_PATH),
             name=str(author_module.get("name") or ""),
             avatar=str(author_module.get("face") or ""),
             pendant=str((author_module.get("pendant") or {}).get("image") or ""),
-            type=str(item.get("type") or ""),
+            type=item_type,
+            label=DYNAMIC_TYPE_LABELS.get(item_type, ""),
+            pub_time=format_bili_timestamp(author_module.get("pub_ts")),
         )
 
     def _fill_video_payload(

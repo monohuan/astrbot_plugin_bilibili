@@ -195,6 +195,14 @@
             color: #6a6a6e;
             margin-top: 2px;
         }
+        .filter-note {
+            font-size: 11px;
+            color: #6a6a6e;
+            line-height: 1.6;
+            word-break: break-all;
+            padding-top: 10px;
+            border-top: 1px dashed #2a2a2e;
+        }
         .image-grid {
             display: grid;
             gap: 4px;
@@ -320,7 +328,7 @@
             {% endif %}
             <div class="user-details">
                 <div class="username">{{ name | default('AstrBot') }}</div>
-                <span class="type-label">{% if type == "DYNAMIC_TYPE_AV" %}投稿视频{% elif type == "DYNAMIC_TYPE_ARTICLE" %}专栏文章{% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态{% elif type == "DYNAMIC_TYPE_DRAW" %}图文动态{% elif type == "DYNAMIC_TYPE_WORD" %}文字动态{% else %}动态更新{% endif %}</span>
+                <span class="type-label">{% if label %}{{ label }}{% else %}{% if type == "DYNAMIC_TYPE_AV" %}投稿视频{% elif type == "DYNAMIC_TYPE_ARTICLE" %}专栏文章{% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态{% elif type == "DYNAMIC_TYPE_DRAW" %}图文动态{% elif type == "DYNAMIC_TYPE_WORD" %}文字动态{% else %}动态更新{% endif %}{% endif %}</span>
             </div>
         </div>
         {% if pub_time %}
@@ -365,7 +373,7 @@
 
         {% if forward and forward.name %}
         <div class="forward-block">
-            <div class="forward-name"><span class="highlight">{{ forward.name }}</span></div>
+            <div class="forward-name"><span class="highlight">{{ forward.name }}</span>{% if forward.label %} · {{ forward.label }}{% endif %}</div>
             {% if forward.title %}<div class="forward-title">{{ forward.title }}</div>{% endif %}
             {% if forward.text %}<div class="forward-text">{{ forward.text | safe }}</div>{% endif %}
             {% if forward.image_urls %}
@@ -380,6 +388,10 @@
         <div class="image-grid grid-{{ image_urls | length }}">
             {% for img in image_urls %}<img src="{{ img }}" alt="image">{% endfor %}
         </div>
+        {% endif %}
+
+        {% if filter_note %}
+        <div class="filter-note">{{ filter_note }}</div>
         {% endif %}
     </div>
 </div>

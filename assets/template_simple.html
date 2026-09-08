@@ -250,6 +250,16 @@
         margin-bottom: 10px;
     }
 
+    .filter-note {
+        font-size: 11px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+        word-break: break-all;
+        padding-top: 8px;
+        border-top: 1px dashed #f0f0f0;
+        margin-top: 8px;
+    }
+
     /* Image Grid */
     .image-grid {
         display: grid;
@@ -391,8 +401,10 @@
                     {% else %}
                     <span class="dynamic-label">
                         {% if type == "DYNAMIC_TYPE_AV" %}投稿视频
-                        {% elif type == "DYNAMIC_TYPE_Article" %}专栏文章
+                        {% elif type == "DYNAMIC_TYPE_ARTICLE" %}专栏文章
                         {% elif type == "DYNAMIC_TYPE_FORWARD" %}转发动态
+                        {% elif type == "DYNAMIC_TYPE_DRAW" %}图文动态
+                        {% elif type == "DYNAMIC_TYPE_WORD" %}文字动态
                         {% else %}动态更新{% endif %}
                     </span>
                     {% endif %}
@@ -448,7 +460,7 @@
                 {% if forward.avatar %}
                 <img src="{{ forward.avatar }}" class="forward-avatar" alt="forward avatar">
                 {% endif %}
-                <span class="forward-name">{{ forward.name }}</span>
+                <span class="forward-name">{{ forward.name }}{% if forward.label %} · {{ forward.label }}{% endif %}</span>
             </div>
             
             <div class="forward-content">
@@ -476,6 +488,10 @@
             <img src="{{ img }}" alt="image">
             {% endfor %}
         </div>
+        {% endif %}
+
+        {% if filter_note %}
+        <div class="filter-note">{{ filter_note }}</div>
         {% endif %}
     </div>
 

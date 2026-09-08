@@ -3,6 +3,7 @@ import html
 import io
 import os
 import re
+import time
 from urllib.parse import urlparse
 
 import aiohttp
@@ -91,6 +92,23 @@ def is_valid_url(url: str) -> bool:
         return all([parsed.scheme, parsed.netloc])
     except ValueError:
         return False
+
+
+def format_bili_timestamp(ts) -> str:
+    """
+    将 unix 时间戳格式化为 "YYYY-MM-DD HH:MM"（本地时区）。
+    无效输入（None / 非数字 / <=0）返回空字符串。
+    """
+    try:
+        ts_int = int(ts)
+    except (TypeError, ValueError):
+        return ""
+    if ts_int <= 0:
+        return ""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts_int))
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def is_valid_umo(umo: str) -> bool:

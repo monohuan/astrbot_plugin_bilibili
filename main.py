@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import json
 import os
 import re
@@ -25,6 +27,8 @@ from .bili_client import BiliClient
 from .core.constant import (
     AT_ALL_OPTION,
     AT_SUB_OPTION,
+    BANNER_PATH,
+    BILI_HELP_TEXT,
     BV,
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
@@ -40,8 +44,8 @@ from .core.constant import (
     get_template_names,
 )
 from .core.data_manager import DataManager
-from .core.models import RenderPayload, SubscriptionRecord
-from .core.utils import is_height_valid, is_valid_umo
+from .core.models import ForwardPayload, RenderPayload, SubscriptionRecord
+from .core.utils import create_qrcode, image_to_base64, is_height_valid, is_valid_umo
 from .services.dispatcher import SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
 from .services.renderer import Renderer
@@ -463,6 +467,7 @@ class Main(Star):
                 title=str(info.get("title") or ""),
                 desc=str(info.get("desc") or ""),
                 pub_time=_fmt_time(info.get("pubdate")),
+                label="视频动态",
                 stat_view=str(stat.get("view", 0)),
                 stat_like=str(stat.get("like", 0)),
                 stat_coin=str(stat.get("coin", 0)),
@@ -947,6 +952,161 @@ class Main(Star):
         await self.dynamic_listener._handle_new_dynamic(
             sub_user, render_data, None, sub_data=sub_data
         )
+        event.stop_event()
+
+    @command("bili_help", alias={"b站帮助"})
+    async def bili_help(self, event: AstrMessageEvent):
+        """查看 bilibili 插件命令与过滤规则说明。"""
+        return MessageEventResult().message(BILI_HELP_TEXT)
+
+    @staticmethod
+    def _make_mock_image(rgb: Tuple[int, int, int], size: Tuple[int, int] = (640, 360)) -> str:
+        """生成纯色占位图并转为 Base64 Data URI，供样式测试卡片使用。"""
+        try:
+            from PIL import Image as PILImage
+
+            img = PILImage.new("RGB", size, rgb)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+        except Exception as e:
+            logger.warning(f"生成样式测试占位图失败: {e}")
+            return ""
+
+    def _build_style_test_payloads(self) -> List[Tuple[str, RenderPayload]]:
+        """构建五种动态类型的样式测试卡片数据（含发布时间/类型标注/过滤规则展示）。"""
+        img_pink = self._make_mock_image((251, 114, 153))
+        img_green = self._make_mock_image((124, 179, 66))
+        img_blue = self._make_mock_image((64, 132, 220))
+        avatar = self._make_mock_image((120, 120, 130), size=(200, 200))
+        filter_note = "已开启过滤：图文　正则：抽奖；广告"
+        banner = image_to_base64(BANNER_PATH)
+        video_url = "https://www.bilibili.com/video/BV1StyleTest"
+        live_url = "https://live.bilibili.com/10000"
+
+        return [
+            (
+                "视频动态",
+                RenderPayload(
+                    banner=banner,
+                    name="测试UP主",
+                    avatar=avatar,
+                    type="DYNAMIC_TYPE_AV",
+                    label="视频动态",
+                    pub_time="2026-09-08 20:00",
+                    title="【样式测试】视频标题",
+                    text="投稿了新视频<br>这里是动态正文示例",
+                    image_urls=[img_pink],
+                    url=video_url,
+                    qrcode=create_qrcode(video_url),
+                    filter_note=filter_note,
+                    stat_view="12345",
+                    stat_like="678",
+                    stat_coin="90",
+                ),
+            ),
+            (
+                "图文动态",
+                RenderPayload(
+                    banner=banner,
+                    name="测试UP主",
+                    avatar=avatar,
+                    type="DYNAMIC_TYPE_DRAW",
+                    label="图文动态",
+                    pub_time="2026-09-08 18:30",
+                    text="发布了新图文动态<br>这里是图文动态正文示例",
+                    image_urls=[img_pink, img_green, img_blue],
+                    filter_note=filter_note,
+                ),
+            ),
+            (
+                "转发动态",
+                RenderPayload(
+                    banner=banner,
+                    name="测试UP主",
+                    avatar=avatar,
+                    type="DYNAMIC_TYPE_FORWARD",
+                    label="转发动态",
+                    pub_time="2026-09-08 17:00",
+                    text="转发了新动态<br>转发时说的话",
+                    filter_note=filter_note,
+                    forward=ForwardPayload(
+                        name="原作者",
+                        avatar=avatar,
+                        type="DYNAMIC_TYPE_AV",
+                        label="视频动态",
+                        title="被转发的视频标题",
+                        text="被转发原文内容",
+                        image_urls=[img_green],
+                    ),
+                ),
+            ),
+            (
+                "直播开播",
+                RenderPayload(
+                    banner=banner,
+                    name="测试UP主",
+                    avatar=avatar,
+                    label="直播动态",
+                    pub_time="2026-09-08 19:00",
+                    title="【样式测试】直播间标题",
+                    text="📣 你订阅的UP 「测试UP主」 开播了！",
+                    image_urls=[img_blue],
+                    url=live_url,
+                    qrcode=create_qrcode(live_url),
+                ),
+            ),
+            (
+                "直播下播",
+                RenderPayload(
+                    banner=banner,
+                    name="测试UP主",
+                    avatar=avatar,
+                    label="直播动态",
+                    pub_time="2026-09-08 19:00",
+                    title="【样式测试】直播间标题",
+                    text=(
+                        "📣 你订阅的UP 「测试UP主」 下播了！<br>"
+                        "本场直播时长：2小时30分钟0秒"
+                    ),
+                    image_urls=[img_blue],
+                    url=live_url,
+                    qrcode=create_qrcode(live_url),
+                ),
+            ),
+        ]
+
+    @permission_type(PermissionType.ADMIN)
+    @command("bili_style_test", alias={"样式测试"})
+    async def style_test(self, event: AstrMessageEvent, style: str | None = None):
+        """渲染样式测试卡片，快速预览各动态类型的推送样式。用法: /bili_style_test [样式名]"""
+        available = get_template_names()
+        if style and style not in available:
+            return MessageEventResult().message(
+                f"样式 '{style}' 不存在。可用样式：{', '.join(available)}"
+            )
+        target_style = style or self.style
+        payloads = self._build_style_test_payloads()
+
+        await event.send(
+            MessageChain().message(
+                f"样式测试（{target_style}）：共 {len(payloads)} 张卡片，正在渲染…"
+            )
+        )
+        for name, payload in payloads:
+            try:
+                img_path = await self.renderer.render_dynamic(payload, style=target_style)
+            except Exception as e:
+                logger.error(f"样式测试渲染失败 ({name}): {e}")
+                img_path = None
+            if img_path:
+                await event.send(
+                    MessageChain().message(f"【{target_style}】{name}").file_image(img_path)
+                )
+            else:
+                await event.send(
+                    MessageChain().message(f"【{target_style}】{name} 渲染失败 (´;ω;`)")
+                )
         event.stop_event()
 
     async def terminate(self):
