@@ -48,20 +48,20 @@ CARD_TEMPLATES: Dict[str, dict] = {
         "file": "template_simple.html",
         "path": _asset_path("template_simple.html"),
     },
-    "wakaba_dark": {
-        "name": "若叶·暗",
-        "file": "wakaba_dark.html",
-        "path": _asset_path("wakaba_dark.html"),
+    "mutsumi_dark": {
+        "name": "Mutsumi·暗",
+        "file": "mutsumi_dark.html",
+        "path": _asset_path("mutsumi_dark.html"),
     },
-    "wakaba_light": {
-        "name": "若叶·亮",
-        "file": "wakaba_light.html",
-        "path": _asset_path("wakaba_light.html"),
+    "mutsumi_light": {
+        "name": "Mutsumi·亮",
+        "file": "mutsumi_light.html",
+        "path": _asset_path("mutsumi_light.html"),
     },
 }
 
 # 默认模板
-DEFAULT_TEMPLATE = "wakaba_dark"
+DEFAULT_TEMPLATE = "mutsumi_dark"
 
 
 def get_template_path(style: str) -> str:

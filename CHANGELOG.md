@@ -5,6 +5,10 @@
 - `bili_style_test` 扩展：新增订阅成功、订阅更新、订阅列表三张测试卡片，以及订阅删除、图片转发状态两条文本示例，便于快速验收。
 - 视频搜索结果增加发布时间：视频列表图每个条目新增「YYYY-MM-DD 发布」chip；单视频图文与纯文本降级列表同步显示发布时间。
 - 强化视频搜索工具（`bili_search_hot_videos`）的 limit 判定说明：用户说「给我一个/帮我找一个 XX 视频」等单数量词措辞时 limit 必须为 1（返回单视频图文），避免被当成列表搜索。
+- 模板重命名：`wakaba_dark` / `wakaba_light` 更名为 `mutsumi_dark` / `mutsumi_light`（显示名「Mutsumi·暗 / Mutsumi·亮」，配置项 `renderer_template` 同步更新；旧配置值会自动回退默认样式）。
+- 订阅列表/订阅卡片的过滤类型改为英文原值（video/draw/forward/article/live/lottery/forward_lottery）；「@全体成员」更名为「推送@全体」；「图片转发」状态移入每条订阅卡片（显示在推送@全体之后），不再显示全局强制标注。
+- `bili_sub_test`（订阅测试）改为仅管理员可用。
+- `bili_style_test` 新增多图图文动态裁剪案例，并以合并聊天记录形式演示原图转发。
 
 ## v1.7.0
 - 订阅防补发：新增首次同步保护，订阅建立后首轮轮询只记录基线不推送，杜绝补发历史动态。

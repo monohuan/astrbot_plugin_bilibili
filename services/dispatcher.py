@@ -9,7 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import MessageEventResult
 from astrbot.api.message_components import Node
 
-NotificationCategory = Literal["dynamic", "live"]
+NotificationCategory = Literal["dynamic", "live", "style_test"]
 SentHook = Callable[["SubscriptionNotification"], None | Awaitable[None]]
 
 

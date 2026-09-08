@@ -166,13 +166,10 @@
             <div class="filter-row">
                 <span class="filter-label">直播@全体</span>
                 <span class="chip {{ 'on' if live_atall else 'off' }}">{{ '开启' if live_atall else '关闭' }}</span>
-                <span class="filter-label">@全体成员</span>
+                <span class="filter-label">推送@全体</span>
                 <span class="chip {{ 'on' if at_all else 'off' }}">{{ '开启' if at_all else '关闭' }}</span>
                 <span class="filter-label">图片转发</span>
                 <span class="chip {{ 'on' if img_forward else 'off' }}">{{ '开启' if img_forward else '关闭' }}</span>
-                {% if img_forward_global is defined and img_forward_global is not none %}
-                <span class="chip none">全局强制{{ '开启' if img_forward_global else '关闭' }}</span>
-                {% endif %}
             </div>
             {% if at_sub_users %}
             <div class="filter-row">

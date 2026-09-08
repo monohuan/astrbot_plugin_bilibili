@@ -46,8 +46,8 @@
         "description": "renderer_template",
         "type": "string",
         "hint": "渲染模板",
-        "options": ["simple", "wakaba_dark", "wakaba_light"],
-        "default": "wakaba_dark"
+        "options": ["simple", "mutsumi_dark", "mutsumi_light"],
+        "default": "mutsumi_dark"
     },
     "node": {
         "description": "node",

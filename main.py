@@ -19,7 +19,7 @@ from astrbot.api.event.filter import (
     permission_type,
     regex,
 )
-from astrbot.api.message_components import File, Image
+from astrbot.api.message_components import File, Image, Node
 from astrbot.core.star.filter.command import GreedyStr
 from bilibili_api import login_v2
 
@@ -32,7 +32,6 @@ from .core.constant import (
     BV,
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
-    FILTER_TYPE_LABELS,
     LIVE_ATALL_OPTION,
     RECENT_DYNAMIC_CACHE,
     RECONNECT_SILENT_PADDING_SECS,
@@ -47,7 +46,7 @@ from .core.constant import (
 from .core.data_manager import DataManager
 from .core.models import ForwardPayload, RenderPayload, SubscriptionRecord
 from .core.utils import create_qrcode, image_to_base64, is_height_valid, is_valid_umo
-from .services.dispatcher import SubscriptionNotificationDispatcher
+from .services.dispatcher import SubscriptionNotification, SubscriptionNotificationDispatcher
 from .services.listener import DynamicListener
 from .services.renderer import Renderer
 from .services.subscription_service import SubscriptionService
@@ -226,7 +225,6 @@ class Main(Star):
         title: str = "订阅成功",
         record: Optional[SubscriptionRecord] = None,
         img_forward: bool = False,
-        img_forward_global: Optional[bool] = None,
     ) -> dict:
         filter_types: List[str] = []
         filter_regex: List[str] = []
@@ -234,9 +232,7 @@ class Main(Star):
         at_all = False
         at_sub_users: List[str] = []
         if record:
-            filter_types = [
-                FILTER_TYPE_LABELS.get(ft, ft) for ft in record.filter_types
-            ]
+            filter_types = list(record.filter_types)
             filter_regex = list(record.filter_regex)
             live_atall = bool(record.live_atall)
             at_all = bool(record.at_all)
@@ -253,7 +249,6 @@ class Main(Star):
             "at_all": at_all,
             "at_sub_users": at_sub_users,
             "img_forward": bool(img_forward),
-            "img_forward_global": img_forward_global,
         }
 
     async def _render_sub_success(self, context: dict) -> str | None:
@@ -601,7 +596,6 @@ class Main(Star):
             title=title,
             record=record,
             img_forward=self.data_manager.get_img_forward_enabled(sub_user),
-            img_forward_global=self.data_manager.get_img_forward_global(),
         )
         return await self._send_subscription_result(event, payload)
 
@@ -652,7 +646,9 @@ class Main(Star):
             logger.debug(f"解析会话显示名失败 ({sub_user}): {e}")
             return ""
 
-    async def _build_sub_list_item(self, uid_sub_data: SubscriptionRecord) -> dict:
+    async def _build_sub_list_item(
+        self, uid_sub_data: SubscriptionRecord, img_forward: bool = False
+    ) -> dict:
         uid = uid_sub_data.uid
         name = str(uid)
         face = ""
@@ -674,6 +670,7 @@ class Main(Star):
             "live_atall": bool(uid_sub_data.live_atall),
             "at_all": bool(uid_sub_data.at_all),
             "at_sub_users": list(uid_sub_data.at_sub_users),
+            "img_forward": bool(img_forward),
         }
 
     async def _render_sub_list_image(
@@ -749,7 +746,11 @@ class Main(Star):
         if not subs:
             return MessageEventResult().message("无订阅")
 
-        items = [await self._build_sub_list_item(s) for s in subs]
+        session_img_forward = self.data_manager.get_img_forward_enabled(sub_user)
+        items = [
+            await self._build_sub_list_item(s, img_forward=session_img_forward)
+            for s in subs
+        ]
         sessions = [
             {
                 "sid": self._extract_sid(sub_user),
@@ -931,15 +932,17 @@ class Main(Star):
         sessions = []
         total = 0
         for sub_user, sub_list in all_subs.items():
-            items = [await self._build_sub_list_item(s) for s in sub_list]
+            session_img_forward = self.data_manager.get_img_forward_enabled(sub_user)
+            items = [
+                await self._build_sub_list_item(s, img_forward=session_img_forward)
+                for s in sub_list
+            ]
             total += len(items)
             sessions.append(
                 {
                     "sid": self._extract_sid(sub_user),
                     "chat_type": self._extract_chat_type(sub_user),
                     "display_name": await self._resolve_session_display_name(sub_user),
-                    "img_forward": self.data_manager.get_img_forward_enabled(sub_user),
-                    "img_forward_global": self.data_manager.get_img_forward_global(),
                     "subs": items,
                 }
             )
@@ -989,6 +992,7 @@ class Main(Star):
                     except Exception as e:
                         logger.error(f"An error occurred during JSON processing: {e}")
 
+    @permission_type(PermissionType.ADMIN)
     @command("bili_sub_test", alias={"订阅测试"})
     async def sub_test(self, event: AstrMessageEvent, uid: str = ""):
         """测试订阅功能。仅测试获取动态与渲染图片功能，不保存订阅信息。"""
@@ -1053,6 +1057,21 @@ class Main(Star):
         except Exception as e:
             logger.warning(f"生成样式测试占位图失败: {e}")
             return ""
+
+    def _save_mock_image(
+        self, rgb: Tuple[int, int, int], name: str = "bili_style_mock.jpg"
+    ) -> str | None:
+        """生成纯色占位图并保存为本地文件（合并转发节点需要本地路径）。"""
+        try:
+            from PIL import Image as PILImage
+
+            img = PILImage.new("RGB", (640, 360), rgb)
+            path = os.path.join(tempfile.gettempdir(), name)
+            img.save(path, format="JPEG", quality=85)
+            return path
+        except Exception as e:
+            logger.warning(f"保存样式测试占位图失败: {e}")
+            return None
 
     def _build_style_test_payloads(self) -> List[Tuple[str, RenderPayload]]:
         """构建五种动态类型的样式测试卡片数据（含发布时间/类型标注）。"""
@@ -1164,7 +1183,7 @@ class Main(Star):
             )
         target_style = style or self.style
         payloads = self._build_style_test_payloads()
-        sub_card_count = 3  # 订阅成功 / 订阅更新 / 订阅列表
+        sub_card_count = 4  # 多图裁剪图文 / 订阅成功 / 订阅更新 / 订阅列表
 
         await event.send(
             MessageChain().message(
@@ -1187,26 +1206,81 @@ class Main(Star):
                     MessageChain().message(f"【{target_style}】{name} 渲染失败 (´;ω;`)")
                 )
 
-        # —— 订阅成功 / 订阅更新卡片 ——
+        # —— 多图裁剪 + 原图合并转发演示 ——
+        banner = image_to_base64(BANNER_PATH)
         avatar = self._make_mock_image((120, 120, 130), size=(200, 200))
+        img_pink = self._make_mock_image((251, 114, 153))
+        img_green = self._make_mock_image((124, 179, 66))
+        img_blue = self._make_mock_image((64, 132, 220))
+        multi_payload = RenderPayload(
+            banner=banner,
+            name="测试UP主",
+            avatar=avatar,
+            type="DYNAMIC_TYPE_DRAW",
+            label="图文动态",
+            pub_time="2026-09-09 01:00",
+            text="发布了新图文动态<br>图片数大于 1：推送卡片的多图网格会裁剪",
+            image_urls=[img_pink, img_green, img_blue],
+        )
+        try:
+            img_path = await self.renderer.render_dynamic(
+                multi_payload, style=target_style
+            )
+        except Exception as e:
+            logger.error(f"样式测试渲染失败 (多图图文动态): {e}")
+            img_path = None
+        if img_path:
+            await event.send(
+                MessageChain().message(f"【{target_style}】多图图文动态(裁剪)").file_image(img_path)
+            )
+        else:
+            await event.send(
+                MessageChain().message(f"【{target_style}】多图图文动态(裁剪) 渲染失败 (´;ω;`)")
+            )
+        node_images = []
+        for idx, rgb in enumerate(
+            ((251, 114, 153), (124, 179, 66), (64, 132, 220)), start=1
+        ):
+            path = self._save_mock_image(rgb, name=f"bili_style_mock_{idx}.jpg")
+            if path:
+                node_images.append(Image.fromFileSystem(path))
+        if node_images:
+            try:
+                node = Node(uin=0, name="测试UP主", content=node_images)
+                await self.dynamic_listener.dispatcher.publish(
+                    SubscriptionNotification(
+                        sub_user=event.unified_msg_origin,
+                        chain_parts=[node],
+                        send_node=False,
+                        category="style_test",
+                        dyn_id=None,
+                        meta={"kind": "original_images"},
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"样式测试合并转发演示失败: {e}")
+                await event.send(
+                    MessageChain().message("（原图合并转发演示失败，请查看日志）")
+                )
+
+        # —— 订阅成功 / 订阅更新卡片 ——
         sub_card_cases = [
-            ("订阅成功", "订阅成功", True, None),
-            ("订阅更新", "订阅更新", False, False),
+            ("订阅成功", "订阅成功", True),
+            ("订阅更新", "订阅更新", False),
         ]
-        for case_name, card_title, img_fw, fw_global in sub_card_cases:
+        for case_name, card_title, img_fw in sub_card_cases:
             context = {
                 "uid": "100870070",
                 "name": "测试UP主",
                 "avatar": avatar,
                 "note": "",
                 "title": card_title,
-                "filter_types": ["视频", "图文"],
+                "filter_types": ["video", "draw"],
                 "filter_regex": ["抽奖|中奖"],
                 "live_atall": True,
                 "at_all": False,
                 "at_sub_users": [],
                 "img_forward": img_fw,
-                "img_forward_global": fw_global,
             }
             img_path = await self._render_sub_success(context)
             if img_path:
@@ -1218,16 +1292,17 @@ class Main(Star):
                     MessageChain().message(f"【订阅卡片】{case_name} 渲染失败 (´;ω;`)")
                 )
 
-        # —— 订阅列表卡片（含图片转发状态展示） ——
+        # —— 订阅列表卡片（图片转发状态显示在每条订阅卡片里） ——
         sub_item_a = {
             "uid": "100870070",
             "name": "测试UP主",
             "face": avatar,
-            "filter_types": ["视频", "图文"],
+            "filter_types": ["video", "draw"],
             "filter_regex": ["抽奖|中奖"],
             "live_atall": True,
             "at_all": False,
             "at_sub_users": [],
+            "img_forward": True,
         }
         sub_item_b = {
             "uid": "200200200",
@@ -1238,22 +1313,19 @@ class Main(Star):
             "live_atall": False,
             "at_all": True,
             "at_sub_users": ["测试用户"],
+            "img_forward": False,
         }
         list_sessions = [
             {
                 "sid": "123456",
                 "chat_type": "GroupMessage",
                 "display_name": "测试群聊",
-                "img_forward": True,
-                "img_forward_global": None,
                 "subs": [sub_item_a],
             },
             {
                 "sid": "888888",
                 "chat_type": "FriendMessage",
                 "display_name": "",
-                "img_forward": False,
-                "img_forward_global": False,
                 "subs": [sub_item_b],
             },
         ]
