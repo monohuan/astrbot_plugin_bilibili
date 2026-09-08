@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 import time
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.all import *
@@ -32,6 +32,7 @@ from .core.constant import (
     BV,
     CARD_TEMPLATES,
     DEFAULT_TEMPLATE,
+    FILTER_TYPE_LABELS,
     LIVE_ATALL_OPTION,
     RECENT_DYNAMIC_CACHE,
     RECONNECT_SILENT_PADDING_SECS,
@@ -223,15 +224,36 @@ class Main(Star):
         avatar: str,
         note: str = "",
         title: str = "订阅成功",
-        filter_note: str = "",
+        record: Optional[SubscriptionRecord] = None,
+        img_forward: bool = False,
+        img_forward_global: Optional[bool] = None,
     ) -> dict:
+        filter_types: List[str] = []
+        filter_regex: List[str] = []
+        live_atall = False
+        at_all = False
+        at_sub_users: List[str] = []
+        if record:
+            filter_types = [
+                FILTER_TYPE_LABELS.get(ft, ft) for ft in record.filter_types
+            ]
+            filter_regex = list(record.filter_regex)
+            live_atall = bool(record.live_atall)
+            at_all = bool(record.at_all)
+            at_sub_users = list(record.at_sub_users)
         return {
             "uid": str(uid),
             "name": name,
             "avatar": avatar,
             "note": note.strip(),
             "title": title,
-            "filter_note": filter_note.strip(),
+            "filter_types": filter_types,
+            "filter_regex": filter_regex,
+            "live_atall": live_atall,
+            "at_all": at_all,
+            "at_sub_users": at_sub_users,
+            "img_forward": bool(img_forward),
+            "img_forward_global": img_forward_global,
         }
 
     async def _render_sub_success(self, context: dict) -> str | None:
@@ -267,12 +289,10 @@ class Main(Star):
         uid = payload.get("uid", "")
         note = payload.get("note", "")
         title = payload.get("title", "") or "订阅成功"
-        filter_note = payload.get("filter_note", "")
         text = f"{title}！UP 主: {name} (UID: {uid})"
         if note:
             text += f"\n{note}"
-        if filter_note:
-            text += f"\n{filter_note}"
+        text += f"\n图片转发: {'开启' if payload.get('img_forward') else '关闭'}"
         if self.rai:
             img_path = await self._render_sub_success(payload)
             if img_path:
@@ -555,25 +575,20 @@ class Main(Star):
         if updated and warning:
             update_msg += warning
 
-        # 首次订阅与更新过滤条件统一走卡片推送，均附带当前过滤规则。
-        title = "订阅已更新" if updated else "订阅成功"
+        # 首次订阅与更新过滤条件统一走卡片推送，卡片附 sub_list 同款过滤规则展示。
+        title = "订阅更新" if updated else "订阅成功"
         record = self.data_manager.get_subscription(sub_user, uid_int)
-        filter_note = self.dynamic_listener._build_filter_note(record)
 
         try:
             usr_info, msg = await self.bili_client.get_user_info(uid_int)
         except Exception as e:
             logger.error(f"获取用户信息失败: {e}")
             if updated:
-                return MessageEventResult().message(
-                    "\n".join(x for x in (update_msg, filter_note) if x)
-                )
+                return MessageEventResult().message(update_msg)
             return MessageEventResult().message("订阅成功，但获取 UP 主信息失败。")
         if not usr_info:
             if updated:
-                return MessageEventResult().message(
-                    "\n".join(x for x in (update_msg, filter_note) if x)
-                )
+                return MessageEventResult().message(update_msg)
             return MessageEventResult().message(
                 f"订阅成功，但获取 UP 主信息失败: {msg}"
             )
@@ -584,7 +599,9 @@ class Main(Star):
             str(usr_info.get("face", "")),
             note=update_msg if updated else warning,
             title=title,
-            filter_note=filter_note,
+            record=record,
+            img_forward=self.data_manager.get_img_forward_enabled(sub_user),
+            img_forward_global=self.data_manager.get_img_forward_global(),
         )
         return await self._send_subscription_result(event, payload)
 
@@ -659,13 +676,13 @@ class Main(Star):
             "at_sub_users": list(uid_sub_data.at_sub_users),
         }
 
-    async def _send_sub_list_image(
+    async def _render_sub_list_image(
         self,
-        event: AstrMessageEvent,
         title: str,
         sessions: List[dict],
         total: int,
-    ) -> MessageEventResult:
+    ) -> str | None:
+        """渲染订阅列表卡片，返回图片路径；失败返回 None。"""
         context = {
             "title": title,
             "total": total,
@@ -677,7 +694,7 @@ class Main(Star):
                 tmpl = f.read()
         except Exception as e:
             logger.error(f"加载订阅列表模板失败: {e}")
-            return MessageEventResult().message("订阅列表模板加载失败")
+            return None
 
         options = {
             "full_page": True,
@@ -694,9 +711,21 @@ class Main(Star):
             )
         except Exception as e:
             logger.error(f"渲染订阅列表失败: {e}")
-            img_path = None
+            return None
 
-        if not img_path or not os.path.exists(img_path):
+        if img_path and os.path.exists(img_path):
+            return img_path
+        return None
+
+    async def _send_sub_list_image(
+        self,
+        event: AstrMessageEvent,
+        title: str,
+        sessions: List[dict],
+        total: int,
+    ) -> MessageEventResult:
+        img_path = await self._render_sub_list_image(title, sessions, total)
+        if not img_path:
             return MessageEventResult().message("订阅列表渲染失败")
 
         platform_name = self.dynamic_listener._resolve_platform_name(
@@ -746,11 +775,20 @@ class Main(Star):
             )
 
         uid2del = int(uid)
-
-        if await self.data_manager.remove_subscription(sub_user, uid2del):
-            return MessageEventResult().message("删除成功")
-        else:
+        record = self.data_manager.get_subscription(sub_user, uid2del)
+        if not await self.data_manager.remove_subscription(sub_user, uid2del):
             return MessageEventResult().message("未找到指定的订阅")
+
+        name = ""
+        try:
+            usr_info, _ = await self.bili_client.get_user_info(uid2del)
+            if usr_info:
+                name = str(usr_info.get("name", "") or "")
+        except Exception as e:
+            logger.warning(f"删除订阅后获取 UP 主信息失败: {e}")
+        if name:
+            return MessageEventResult().message(f"删除成功：{name} (UID: {uid2del})")
+        return MessageEventResult().message(f"删除成功 (UID: {uid2del})")
 
     @permission_type(PermissionType.ADMIN)
     @command("bili_global_del", alias={"全局删除"})
@@ -900,6 +938,8 @@ class Main(Star):
                     "sid": self._extract_sid(sub_user),
                     "chat_type": self._extract_chat_type(sub_user),
                     "display_name": await self._resolve_session_display_name(sub_user),
+                    "img_forward": self.data_manager.get_img_forward_enabled(sub_user),
+                    "img_forward_global": self.data_manager.get_img_forward_global(),
                     "subs": items,
                 }
             )
@@ -1015,12 +1055,11 @@ class Main(Star):
             return ""
 
     def _build_style_test_payloads(self) -> List[Tuple[str, RenderPayload]]:
-        """构建五种动态类型的样式测试卡片数据（含发布时间/类型标注/过滤规则展示）。"""
+        """构建五种动态类型的样式测试卡片数据（含发布时间/类型标注）。"""
         img_pink = self._make_mock_image((251, 114, 153))
         img_green = self._make_mock_image((124, 179, 66))
         img_blue = self._make_mock_image((64, 132, 220))
         avatar = self._make_mock_image((120, 120, 130), size=(200, 200))
-        filter_note = "已开启过滤：图文　正则：抽奖；广告"
         banner = image_to_base64(BANNER_PATH)
         video_url = "https://www.bilibili.com/video/BV1StyleTest"
         live_url = "https://live.bilibili.com/10000"
@@ -1040,7 +1079,6 @@ class Main(Star):
                     image_urls=[img_pink],
                     url=video_url,
                     qrcode=create_qrcode(video_url),
-                    filter_note=filter_note,
                     stat_view="12345",
                     stat_like="678",
                     stat_coin="90",
@@ -1057,7 +1095,6 @@ class Main(Star):
                     pub_time="2026-09-08 18:30",
                     text="发布了新图文动态<br>这里是图文动态正文示例",
                     image_urls=[img_pink, img_green, img_blue],
-                    filter_note=filter_note,
                 ),
             ),
             (
@@ -1070,7 +1107,6 @@ class Main(Star):
                     label="转发动态",
                     pub_time="2026-09-08 17:00",
                     text="转发了新动态<br>转发时说的话",
-                    filter_note=filter_note,
                     forward=ForwardPayload(
                         name="原作者",
                         avatar=avatar,
@@ -1120,7 +1156,7 @@ class Main(Star):
     @permission_type(PermissionType.ADMIN)
     @command("bili_style_test", alias={"样式测试"})
     async def style_test(self, event: AstrMessageEvent, style: str | None = None):
-        """渲染样式测试卡片，快速预览各动态类型的推送样式。用法: /bili_style_test [样式名]"""
+        """渲染样式测试卡片，快速预览各动态类型与订阅相关样式。用法: /bili_style_test [样式名]"""
         available = get_template_names()
         if style and style not in available:
             return MessageEventResult().message(
@@ -1128,10 +1164,12 @@ class Main(Star):
             )
         target_style = style or self.style
         payloads = self._build_style_test_payloads()
+        sub_card_count = 3  # 订阅成功 / 订阅更新 / 订阅列表
 
         await event.send(
             MessageChain().message(
-                f"样式测试（{target_style}）：共 {len(payloads)} 张卡片，正在渲染…"
+                f"样式测试（{target_style}）：共 {len(payloads) + sub_card_count} 张卡片"
+                "与 2 条文本示例，正在渲染…"
             )
         )
         for name, payload in payloads:
@@ -1148,7 +1186,167 @@ class Main(Star):
                 await event.send(
                     MessageChain().message(f"【{target_style}】{name} 渲染失败 (´;ω;`)")
                 )
+
+        # —— 订阅成功 / 订阅更新卡片 ——
+        avatar = self._make_mock_image((120, 120, 130), size=(200, 200))
+        sub_card_cases = [
+            ("订阅成功", "订阅成功", True, None),
+            ("订阅更新", "订阅更新", False, False),
+        ]
+        for case_name, card_title, img_fw, fw_global in sub_card_cases:
+            context = {
+                "uid": "100870070",
+                "name": "测试UP主",
+                "avatar": avatar,
+                "note": "",
+                "title": card_title,
+                "filter_types": ["视频", "图文"],
+                "filter_regex": ["抽奖|中奖"],
+                "live_atall": True,
+                "at_all": False,
+                "at_sub_users": [],
+                "img_forward": img_fw,
+                "img_forward_global": fw_global,
+            }
+            img_path = await self._render_sub_success(context)
+            if img_path:
+                await event.send(
+                    MessageChain().message(f"【订阅卡片】{case_name}").file_image(img_path)
+                )
+            else:
+                await event.send(
+                    MessageChain().message(f"【订阅卡片】{case_name} 渲染失败 (´;ω;`)")
+                )
+
+        # —— 订阅列表卡片（含图片转发状态展示） ——
+        sub_item_a = {
+            "uid": "100870070",
+            "name": "测试UP主",
+            "face": avatar,
+            "filter_types": ["视频", "图文"],
+            "filter_regex": ["抽奖|中奖"],
+            "live_atall": True,
+            "at_all": False,
+            "at_sub_users": [],
+        }
+        sub_item_b = {
+            "uid": "200200200",
+            "name": "另一位UP主",
+            "face": avatar,
+            "filter_types": [],
+            "filter_regex": [],
+            "live_atall": False,
+            "at_all": True,
+            "at_sub_users": ["测试用户"],
+        }
+        list_sessions = [
+            {
+                "sid": "123456",
+                "chat_type": "GroupMessage",
+                "display_name": "测试群聊",
+                "img_forward": True,
+                "img_forward_global": None,
+                "subs": [sub_item_a],
+            },
+            {
+                "sid": "888888",
+                "chat_type": "FriendMessage",
+                "display_name": "",
+                "img_forward": False,
+                "img_forward_global": False,
+                "subs": [sub_item_b],
+            },
+        ]
+        img_path = await self._render_sub_list_image(
+            "B站订阅列表", list_sessions, len(list_sessions)
+        )
+        if img_path:
+            await event.send(
+                MessageChain().message("【订阅列表】含图片转发状态").file_image(img_path)
+            )
+        else:
+            await event.send(
+                MessageChain().message("【订阅列表】渲染失败 (´;ω;`)")
+            )
+
+        # —— 文本示例：订阅删除 / 图片转发状态 ——
+        await event.send(
+            MessageChain().message(
+                "【文本示例·订阅删除】\n删除成功：测试UP主 (UID: 100870070)"
+            )
+        )
+        await event.send(
+            MessageChain().message(
+                "【文本示例·图片转发状态】\n"
+                "当前会话多图原图转发：开启\n"
+                "全局状态：未强制（由各会话自行设置）"
+            )
+        )
         event.stop_event()
+
+    @command("bili_img_forward", alias={"图片转发"})
+    async def img_forward_toggle(
+        self, event: AstrMessageEvent, raw_args: GreedyStr = ""
+    ):
+        """开关当前会话：多图动态推送时以合并消息附带原图。
+        用法: /bili_img_forward on|off|status
+        """
+        sub_user = event.unified_msg_origin
+        arg = (raw_args or "").strip().lower()
+        if arg in ("on", "开", "开启"):
+            await self.data_manager.set_img_forward_session(sub_user, True)
+            return MessageEventResult().message(
+                "已开启：多图动态推送时将以合并消息附带原图。"
+            )
+        if arg in ("off", "关", "关闭"):
+            await self.data_manager.set_img_forward_session(sub_user, False)
+            return MessageEventResult().message(
+                "已关闭：多图动态推送不再附带原图合并消息。"
+            )
+        if arg not in ("", "status", "状态"):
+            return MessageEventResult().message(
+                "用法：/bili_img_forward on|off|status"
+            )
+        global_flag = self.data_manager.get_img_forward_global()
+        enabled = self.data_manager.get_img_forward_enabled(sub_user)
+        if global_flag is None:
+            force_desc = "未强制（由各会话自行设置）"
+        elif global_flag:
+            force_desc = "强制开启"
+        else:
+            force_desc = "强制关闭"
+        return MessageEventResult().message(
+            f"当前会话多图原图转发：{'开启' if enabled else '关闭'}\n"
+            f"全局状态：{force_desc}"
+        )
+
+    @permission_type(PermissionType.ADMIN)
+    @command("bili_img_forward_global", alias={"全局图片转发"})
+    async def img_forward_global(
+        self, event: AstrMessageEvent, raw_args: GreedyStr = ""
+    ):
+        """管理员指令。强制所有会话的多图原图转发开关。
+        用法: /bili_img_forward_global on|off|clear
+        """
+        arg = (raw_args or "").strip().lower()
+        if arg in ("on", "开", "开启"):
+            await self.data_manager.set_img_forward_global(True)
+            return MessageEventResult().message(
+                "已全局强制开启：所有会话的多图动态都会附带原图合并消息。"
+            )
+        if arg in ("off", "关", "关闭"):
+            await self.data_manager.set_img_forward_global(False)
+            return MessageEventResult().message(
+                "已全局强制关闭：所有会话的多图动态都不附带原图合并消息。"
+            )
+        if arg in ("clear", "清除", "取消", "none"):
+            await self.data_manager.set_img_forward_global(None)
+            return MessageEventResult().message(
+                "已清除全局强制，恢复各会话自行设置（默认关闭）。"
+            )
+        return MessageEventResult().message(
+            "用法：/bili_img_forward_global on|off|clear"
+        )
 
     async def terminate(self):
         if (

@@ -81,6 +81,19 @@ def _format_duration(raw: Any) -> str:
     return "未知"
 
 
+def _format_pubdate(raw: Any) -> str:
+    """将 B 站返回的发布时间戳格式化为 YYYY-MM-DD，失败返回空字符串。"""
+    try:
+        import time as _time
+
+        ts = int(raw)
+        if ts <= 0:
+            return ""
+        return _time.strftime("%Y-%m-%d", _time.localtime(ts))
+    except Exception:
+        return ""
+
+
 def _normalize_image_url(raw: Any) -> str:
     if not isinstance(raw, str) or not raw.strip():
         return ""
@@ -134,6 +147,7 @@ def _to_video_dict(item: dict[str, Any], *, source: str) -> dict[str, str]:
         "duration": duration,
         "play": play,
         "danmaku": danmaku,
+        "pubdate": _format_pubdate(item.get("pubdate")),
         "cover": cover,
         "url": url,
         "bvid": str(bvid),
@@ -144,9 +158,16 @@ def _to_video_dict(item: dict[str, Any], *, source: str) -> dict[str, str]:
 class BiliSearchHotVideosTool(FunctionTool):
     name: str = "bili_search_hot_videos"
     description: str = (
-        "当用户想找哔哩哔哩视频时调用。"
-        "若用户说“给我找一个/找个/推荐一个/来一个 XX 视频”这类只要一个视频的话，把 limit 设为 1；"
-        "若用户说“帮我找下/有没有 XX 相关的视频/有哪些视频”这类要列表的话，把 limit 设为 5 左右。"
+        "搜索/查找哔哩哔哩视频并把结果直接发给用户。调用前必须先判断用户要几个视频，"
+        "再据此设置 limit：\n"
+        "【只要一个视频 → limit 必须为 1】用户说“给我一个/帮我找一个/找个/推荐一个/"
+        "来一个/来个/发一个 XX 视频”，或句中用“一个/部/条”等单数量词指代结果时，"
+        "limit 一律设为 1，禁止设为 5 或其他数值。此时返回单个视频的图文卡片。\n"
+        "【要多个视频 → limit 设为 5 左右】用户说“帮我找下/有没有/有哪些 XX 相关的视频”"
+        "“来几个/多找几个”“找个列表”等复数措辞，或明确要求对比、汇总多个结果时，"
+        "limit 设为 5 左右，返回列表图。\n"
+        "【例】“给我一个纳西索斯测评视频”→ limit=1；"
+        "“帮我找下纳西索斯测评相关的视频”→ limit=5。\n"
         "无关键词时返回全站热门；有关键词时按关键词搜索。"
     )
     bili_client: Any = None
@@ -168,7 +189,11 @@ class BiliSearchHotVideosTool(FunctionTool):
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "返回数量。用户只要一个视频时设为 1，要列表时设为 5 左右。范围 1-20，默认 8。",
+                    "description": (
+                        "返回数量，范围 1-20。用户只要一个视频（如“给我一个/找一个 XX 视频”）"
+                        "时必须设为 1，不要设为 5；用户要列表/多个视频时设为 5 左右。"
+                        "判断不了几个时再看原句数量词。"
+                    ),
                     "minimum": MIN_LIMIT,
                     "maximum": MAX_LIMIT,
                 },
@@ -238,8 +263,10 @@ class BiliSearchHotVideosTool(FunctionTool):
                 f"《{v['title']}》\n"
                 f"UP主：{v['author']} | 时长：{v['duration']}\n"
                 f"播放：{v['play']} | 弹幕：{v['danmaku']}\n"
-                f"链接：{v['url']}"
             )
+            if v["pubdate"]:
+                text += f"发布时间：{v['pubdate']}\n"
+            text += f"链接：{v['url']}"
             result = MessageEventResult()
             if v["cover"]:
                 result.url_image(v["cover"])
@@ -264,7 +291,9 @@ class BiliSearchHotVideosTool(FunctionTool):
             return MessageEventResult().file_image(img_path)
 
         lines = [
-            f"{i}. 《{v['title']}》\nUP主：{v['author']}  时长：{v['duration']}\n{v['url']}"
+            f"{i}. 《{v['title']}》\nUP主：{v['author']}  时长：{v['duration']}"
+            + (f"  发布：{v['pubdate']}" if v["pubdate"] else "")
+            + f"\n{v['url']}"
             for i, v in enumerate(videos, start=1)
         ]
         return "\n".join(lines)

@@ -82,6 +82,57 @@ class DataManager:
     def _normalize_runtime_fields(self) -> None:
         parsed_ts = int(self.data.get("last_success_sub_notify_ts", 0))
         self.data["last_success_sub_notify_ts"] = max(parsed_ts, 0)
+        self._normalize_img_forward()
+
+    def _normalize_img_forward(self) -> None:
+        """规范多图原图转发开关数据：{"sessions": {sub_user: bool}, "global": bool|None}。"""
+        raw = self.data.get("img_forward")
+        if not isinstance(raw, dict):
+            self.data["img_forward"] = {"sessions": {}, "global": None}
+            return
+        sessions = raw.get("sessions")
+        if not isinstance(sessions, dict):
+            sessions = {}
+        normalized_sessions = {
+            str(k): bool(v) for k, v in sessions.items() if isinstance(v, bool)
+        }
+        global_flag = raw.get("global")
+        if global_flag not in (None, True, False):
+            global_flag = None
+        self.data["img_forward"] = {
+            "sessions": normalized_sessions,
+            "global": global_flag,
+        }
+
+    def get_img_forward_global(self) -> Optional[bool]:
+        """全局强制开关：True/False 强制所有会话，None 表示不强制。"""
+        return self.data.get("img_forward", {}).get("global")
+
+    def get_img_forward_enabled(self, sub_user: str) -> bool:
+        """解析某会话的多图原图转发开关（全局强制优先，会话级默认关闭）。"""
+        global_flag = self.get_img_forward_global()
+        if global_flag is not None:
+            return bool(global_flag)
+        sessions = self.data.get("img_forward", {}).get("sessions", {})
+        return bool(sessions.get(sub_user, False))
+
+    async def set_img_forward_session(
+        self, sub_user: str, enabled: Optional[bool]
+    ) -> None:
+        """设置/清除（None）某会话的多图原图转发开关。"""
+        store = self.data.setdefault("img_forward", {"sessions": {}, "global": None})
+        sessions = store.setdefault("sessions", {})
+        if enabled is None:
+            sessions.pop(sub_user, None)
+        else:
+            sessions[sub_user] = bool(enabled)
+        await self.save()
+
+    async def set_img_forward_global(self, enabled: Optional[bool]) -> None:
+        """设置/清除（None）全局强制开关。"""
+        store = self.data.setdefault("img_forward", {"sessions": {}, "global": None})
+        store["global"] = enabled
+        await self.save()
 
     @staticmethod
     def _write_text(path: str, content: str) -> None:

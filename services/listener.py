@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import re
 import time
 import traceback
@@ -7,7 +6,7 @@ from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from astrbot.api import logger
-from astrbot.api.message_components import At, AtAll, File, Image, Plain
+from astrbot.api.message_components import At, AtAll, File, Image, Node, Plain
 from astrbot.core.star import Context
 from astrbot.core.agent.message import (
     AssistantMessageSegment,
@@ -40,16 +39,6 @@ PLAIN_PUSH_ACTIONS = {
     "DYNAMIC_TYPE_DRAW": "发布了新图文动态",
     "DYNAMIC_TYPE_FORWARD": "转发了新动态",
     "DYNAMIC_TYPE_WORD": "发布了新动态",
-}
-# 过滤类型 -> 中文标签（用于推送卡片上的过滤规则展示）
-FILTER_TYPE_LABELS = {
-    "video": "视频",
-    "draw": "图文",
-    "forward": "转发",
-    "article": "专栏",
-    "live": "直播",
-    "lottery": "抽奖",
-    "forward_lottery": "转发抽奖",
 }
 VIDEO_BODY_PREFIX = "投稿了新视频"
 GROUP_MESSAGE_TYPE = "GroupMessage"
@@ -630,44 +619,58 @@ class DynamicListener:
             self.render_cache.popitem(last=False)
 
     @staticmethod
-    def _build_filter_note(sub_data: Optional[SubscriptionRecord]) -> str:
-        """构建展示在推送卡片上的过滤规则说明，无过滤规则时返回空字符串。"""
-        if not sub_data:
-            return ""
-        parts: List[str] = []
-        type_labels = [
-            FILTER_TYPE_LABELS[t]
-            for t in sub_data.filter_types
-            if t in FILTER_TYPE_LABELS
-        ]
-        if type_labels:
-            parts.append("已开启过滤：" + "、".join(type_labels))
-        if sub_data.filter_regex:
-            parts.append("正则：" + "；".join(sub_data.filter_regex))
-        return "　".join(parts)
+    def _collect_original_images(payload: RenderPayload) -> List[str]:
+        """收集动态的全部原图链接（主动态 + 被转发的原文），保持顺序去重。"""
+        urls: List[str] = []
+        for u in list(payload.image_urls or []):
+            if u and u not in urls:
+                urls.append(u)
+        forward = getattr(payload, "forward", None)
+        if forward:
+            for u in list(forward.image_urls or []):
+                if u and u not in urls:
+                    urls.append(u)
+        return urls
 
-    @staticmethod
-    def _build_filter_cache_suffix(sub_data: Optional[SubscriptionRecord]) -> str:
-        """基于订阅过滤规则生成缓存后缀，保证不同过滤规则的订阅者不共用同一张渲染图。"""
-        if not sub_data:
-            return ""
-        if not sub_data.filter_types and not sub_data.filter_regex:
-            return ""
-        raw = "|".join(
-            [
-                ",".join(sorted(sub_data.filter_types)),
-                "||".join(sub_data.filter_regex),
-            ]
-        )
-        return hashlib.md5(raw.encode("utf-8")).hexdigest()[:10]
-
-    def _resolve_render_cache_key(
-        self, dyn_id: Optional[str], sub_data: Optional[SubscriptionRecord]
-    ) -> Optional[str]:
-        if not dyn_id:
-            return None
-        suffix = self._build_filter_cache_suffix(sub_data)
-        return f"{dyn_id}:{suffix}" if suffix else dyn_id
+    async def _maybe_send_original_images(
+        self,
+        sub_user: str,
+        payload: RenderPayload,
+        dyn_id: Optional[str],
+    ) -> None:
+        """开关开启且动态含多图（推送卡片会裁剪）时，以合并消息补发原图。"""
+        try:
+            if not self.data_manager.get_img_forward_enabled(sub_user):
+                return
+            urls = self._collect_original_images(payload)
+            if len(urls) <= 1:
+                return
+            name = (payload.name or "").strip() or "B站动态"
+            uin = int(payload.uid) if str(payload.uid).isdigit() else 0
+            node = Node(
+                uin=uin,
+                name=name,
+                content=[Image.fromURL(u) for u in urls],
+            )
+            await self.dispatcher.publish(
+                SubscriptionNotification(
+                    sub_user=sub_user,
+                    chain_parts=[node],
+                    send_node=False,
+                    category="dynamic",
+                    dyn_id=dyn_id,
+                    meta={"kind": "original_images"},
+                )
+            )
+            logger.info(
+                f"多图原图合并转发完成: sub_user={sub_user} dyn_id={dyn_id} "
+                f"images={len(urls)}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"多图原图合并转发失败（已忽略）: sub_user={sub_user} "
+                f"dyn_id={dyn_id} error={e}"
+            )
 
     async def _handle_new_dynamic(
         self,
@@ -680,12 +683,7 @@ class DynamicListener:
         if not payload:
             return
 
-        # 注入该订阅生效的过滤规则说明（展示在推送卡片上）
-        filter_note = self._build_filter_note(sub_data)
-        if filter_note:
-            payload.filter_note = filter_note
-
-        cache_key = self._resolve_render_cache_key(dyn_id, sub_data)
+        cache_key = dyn_id
         permit_atall = await self._check_atall_permission(
             sub_user, bool(sub_data and sub_data.at_all)
         )
@@ -705,6 +703,7 @@ class DynamicListener:
                     dyn_id=dyn_id,
                     summary_payload=payload,
                 )
+                await self._maybe_send_original_images(sub_user, payload, dyn_id)
             except Exception as e:
                 logger.error(
                     f"发送缓存动态失败（已忽略）: sub_user={sub_user} "
@@ -771,6 +770,8 @@ class DynamicListener:
                     f"动态推送失败（已缓存并忽略）: sub_user={sub_user} "
                     f"dyn_id={dyn_id} error={e}"
                 )
+            else:
+                await self._maybe_send_original_images(sub_user, payload, dyn_id)
             return
 
         logger.warning(

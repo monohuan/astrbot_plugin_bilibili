@@ -195,14 +195,6 @@
             color: #6a6a6e;
             margin-top: 2px;
         }
-        .filter-note {
-            font-size: 11px;
-            color: #6a6a6e;
-            line-height: 1.6;
-            word-break: break-all;
-            padding-top: 10px;
-            border-top: 1px dashed #2a2a2e;
-        }
         .image-grid {
             display: grid;
             gap: 4px;
@@ -386,10 +378,6 @@
         <div class="image-grid grid-{{ image_urls | length }}">
             {% for img in image_urls %}<img src="{{ img }}" alt="image">{% endfor %}
         </div>
-        {% endif %}
-
-        {% if filter_note %}
-        <div class="filter-note">{{ filter_note }}</div>
         {% endif %}
     </div>
 </div>

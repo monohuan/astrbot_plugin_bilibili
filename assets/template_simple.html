@@ -250,15 +250,6 @@
         margin-bottom: 10px;
     }
 
-    .filter-note {
-        font-size: 11px;
-        color: var(--text-secondary);
-        line-height: 1.6;
-        word-break: break-all;
-        padding-top: 8px;
-        border-top: 1px dashed #f0f0f0;
-        margin-top: 8px;
-    }
 
     /* Image Grid */
     .image-grid {
@@ -488,10 +479,6 @@
             <img src="{{ img }}" alt="image">
             {% endfor %}
         </div>
-        {% endif %}
-
-        {% if filter_note %}
-        <div class="filter-note">{{ filter_note }}</div>
         {% endif %}
     </div>
 

@@ -104,7 +104,6 @@ class RenderPayload:
     authors: List[Dict[str, str]] = field(default_factory=list)
     desc: str = ""
     pub_time: str = ""
-    filter_note: str = ""
     stat_view: str = ""
     stat_like: str = ""
     stat_coin: str = ""
@@ -138,7 +137,6 @@ class RenderPayload:
             authors=list(raw.get("authors") or []),
             desc=str(raw.get("desc", "") or ""),
             pub_time=str(raw.get("pub_time", "") or ""),
-            filter_note=str(raw.get("filter_note", "") or ""),
             stat_view=str(raw.get("stat_view", "") or ""),
             stat_like=str(raw.get("stat_like", "") or ""),
             stat_coin=str(raw.get("stat_coin", "") or ""),
@@ -163,7 +161,6 @@ class RenderPayload:
             "authors": list(self.authors),
             "desc": self.desc,
             "pub_time": self.pub_time,
-            "filter_note": self.filter_note,
             "stat_view": self.stat_view,
             "stat_like": self.stat_like,
             "stat_coin": self.stat_coin,

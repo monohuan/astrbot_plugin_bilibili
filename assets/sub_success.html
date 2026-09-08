@@ -86,13 +86,47 @@
             line-height: 1.5;
             word-break: break-all;
         }
-        .filter-note {
-            font-size: 12px;
-            color: #8a8a8e;
-            line-height: 1.5;
-            word-break: break-all;
-            padding-top: 10px;
+        .filter-section {
+            padding-top: 12px;
             border-top: 1px dashed #2a2a2e;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .filter-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+        .filter-label {
+            font-size: 12px;
+            color: #6a6a6e;
+            flex-shrink: 0;
+            letter-spacing: 0.5px;
+        }
+        .chip {
+            display: inline-block;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 2px 10px;
+            border-radius: 10px;
+            background: #1e1e22;
+            color: #b0b0b4;
+            word-break: break-all;
+        }
+        .chip.on {
+            background: rgba(124, 179, 66, 0.16);
+            color: #7CB342;
+        }
+        .chip.off {
+            background: #1e1e22;
+            color: #5a5a5e;
+        }
+        .chip.none {
+            background: transparent;
+            color: #5a5a5e;
+            border: 1px dashed #2a2a2e;
         }
     </style>
 </head>
@@ -112,9 +146,41 @@
         {% if note %}
         <div class="note">{{ note }}</div>
         {% endif %}
-        {% if filter_note %}
-        <div class="filter-note">{{ filter_note }}</div>
-        {% endif %}
+        <div class="filter-section">
+            <div class="filter-row">
+                <span class="filter-label">过滤类型</span>
+                {% if filter_types %}
+                    {% for ft in filter_types %}<span class="chip">{{ ft }}</span>{% endfor %}
+                {% else %}
+                    <span class="chip none">无</span>
+                {% endif %}
+            </div>
+            <div class="filter-row">
+                <span class="filter-label">过滤正则</span>
+                {% if filter_regex %}
+                    {% for rx in filter_regex %}<span class="chip">{{ rx }}</span>{% endfor %}
+                {% else %}
+                    <span class="chip none">无</span>
+                {% endif %}
+            </div>
+            <div class="filter-row">
+                <span class="filter-label">直播@全体</span>
+                <span class="chip {{ 'on' if live_atall else 'off' }}">{{ '开启' if live_atall else '关闭' }}</span>
+                <span class="filter-label">@全体成员</span>
+                <span class="chip {{ 'on' if at_all else 'off' }}">{{ '开启' if at_all else '关闭' }}</span>
+                <span class="filter-label">图片转发</span>
+                <span class="chip {{ 'on' if img_forward else 'off' }}">{{ '开启' if img_forward else '关闭' }}</span>
+                {% if img_forward_global is defined and img_forward_global is not none %}
+                <span class="chip none">全局强制{{ '开启' if img_forward_global else '关闭' }}</span>
+                {% endif %}
+            </div>
+            {% if at_sub_users %}
+            <div class="filter-row">
+                <span class="filter-label">@订阅者</span>
+                {% for u in at_sub_users %}<span class="chip">{{ u }}</span>{% endfor %}
+            </div>
+            {% endif %}
+        </div>
     </div>
 </div>
 </body>

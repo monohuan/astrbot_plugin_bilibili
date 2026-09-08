@@ -82,12 +82,25 @@ RECONNECT_SILENT_THRESHOLD_SECS = 21600
 RECONNECT_SILENT_PADDING_SECS = 60
 
 # /bili_help 帮助文本（不包含测试指令）
+# 过滤类型 -> 中文标签（用于订阅列表/订阅成功卡片的展示）
+FILTER_TYPE_LABELS = {
+    "video": "视频",
+    "draw": "图文",
+    "forward": "转发",
+    "article": "专栏",
+    "live": "直播",
+    "lottery": "抽奖",
+    "forward_lottery": "转发抽奖",
+}
+
 BILI_HELP_TEXT = """/bili 插件帮助
 📦 订阅相关
   bili_sub <UID> [过滤参数]：订阅UP主动态（别名：订阅动态）
   bili_sub_list：查看当前会话订阅列表（别名：订阅列表）
   bili_sub_del <UID>：删除订阅（别名：订阅删除）
   bili_card_style [样式名]：查看/切换推送卡片样式（别名：卡片样式）
+  bili_img_forward on|off|status：多图动态推送时是否以合并消息附带原图（别名：图片转发），
+    状态会显示在订阅列表与订阅成功/更新卡片中
   bili_help：查看本帮助
 
 🚫 过滤参数（跟在 bili_sub 的 UID 之后）
