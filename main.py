@@ -1078,7 +1078,8 @@ class Main(Star):
 
         sub_data = self.data_manager.get_subscription(sub_user, uid_int)
         if not sub_data:
-            sub_data = SubscriptionRecord(uid=uid_int)
+            # 测试指令：未订阅时构造临时记录，默认开启图片转发以便演示原图合并转发
+            sub_data = SubscriptionRecord(uid=uid_int, img_forward=True)
 
         result_list = self.dynamic_listener._parse_and_filter_dynamics(
             dyn,

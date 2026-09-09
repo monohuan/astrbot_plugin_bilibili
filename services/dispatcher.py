@@ -74,7 +74,9 @@ class SubscriptionNotificationDispatcher:
                     identity = (uin, nickname)
         except Exception as e:
             logger.warning(f"获取 bot 登录信息失败（转发消息将使用默认名称）: {e}")
-        self._bot_identity[platform_id] = identity
+        # 仅在解析成功时缓存，失败时保留重试机会（平台可能只是暂时不可用）
+        if identity != ("0", ""):
+            self._bot_identity[platform_id] = identity
         return identity
 
     async def publish(self, notification: SubscriptionNotification) -> DispatchResult:

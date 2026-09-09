@@ -4,6 +4,9 @@
 - `bili_img_forward on|off` 改为批量开关**当前会话所有订阅**的图片转发；移除 `status`。
 - `bili_img_forward_global <UMO> on|off` 改为批量开关**指定会话所有订阅**的图片转发（管理员）；移除全局强制与 `clear`。
 - `bili_help` 文案重排：过滤参数中列出 `img_forward`，「局部更新」独立小节。
+- 修复：多图原图合并转发完全不触发——`DynamicListener` 缺少 `img_forward_enabled` 属性（读插件总开关），访问时抛 `AttributeError` 被吞掉；补上该属性，并修复渲染缓存命中路径漏传 `sub_data` 导致订阅级开关失效的问题。
+- 修复：转发消息发送者名称硬编码 "AstrBot"，改为取当前 bot 登录 QQ 的昵称（按平台缓存，解析失败才回退默认名）。
+- `bili_sub_test` 在未订阅该 UID 时默认按「图片转发开启」处理，便于直接演示原图合并转发（已订阅时仍按真实订阅配置）。
 
 ## v1.8.1
 - 图片转发支持订阅级设置：`bili_sub` 新增 `img_forward=on|off|clear` 参数（别名可用：`img_forward=1/0/开/关/清除` 等），随订阅持久化并单独生效；`clear` 恢复跟随会话/全局设置。生效优先级：全局强制 > 订阅级覆盖 > 会话级 > 默认关闭。

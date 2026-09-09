@@ -70,6 +70,7 @@ class DynamicListener:
         self.task_gap_secs = self._parse_float(cfg.get("task_gap_secs"), 20, minimum=0)
         self.rai = cfg.get("rai", True)
         self.node = cfg.get("node", False)
+        self.img_forward_enabled = bool(cfg.get("img_forward", False))
         self.dynamic_limit = cfg.get("dynamic_limit", 5)
         self.render_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.render_cache_limit = int(cfg.get("render_cache_limit", 32))
@@ -711,7 +712,9 @@ class DynamicListener:
                     dyn_id=dyn_id,
                     summary_payload=payload,
                 )
-                await self._maybe_send_original_images(sub_user, payload, dyn_id)
+                await self._maybe_send_original_images(
+                    sub_user, payload, dyn_id, sub_data
+                )
             except Exception as e:
                 logger.error(
                     f"发送缓存动态失败（已忽略）: sub_user={sub_user} "
