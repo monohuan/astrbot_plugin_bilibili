@@ -351,9 +351,22 @@ class Main(Star):
         except Exception as e:
             logger.error(f"渲染订阅成功图片失败: {e}")
             return None
-        if img_path and os.path.exists(img_path):
+        if (
+            img_path
+            and os.path.exists(img_path)
+            and self.renderer._validate_image(img_path)
+        ):
             return img_path
         return None
+
+    @staticmethod
+    def _subscription_fallback_chain(payload: dict, text: str) -> MessageChain:
+        """订阅卡片无法生成或上传时，回退为文字和 UP 主头像。"""
+        chain = MessageChain().message(text)
+        avatar = str(payload.get("avatar") or "").strip()
+        if avatar:
+            chain = chain.url_image(avatar)
+        return chain
 
     async def _send_subscription_result(
         self, event: AstrMessageEvent, payload: dict
@@ -369,9 +382,18 @@ class Main(Star):
         if self.rai:
             img_path = await self._render_sub_success(payload)
             if img_path:
-                await event.send(MessageChain().file_image(img_path))
-                return None
-            await event.send(MessageChain().message(text))
+                try:
+                    await event.send(MessageChain().file_image(img_path))
+                    return None
+                except Exception as e:
+                    logger.warning(f"订阅卡片上传失败，降级为图文: {e}")
+            else:
+                logger.warning("订阅卡片生成失败，降级为图文")
+            try:
+                await event.send(self._subscription_fallback_chain(payload, text))
+            except Exception as e:
+                logger.warning(f"订阅图文回退仍上传失败，改发纯文本: {e}")
+                await event.send(MessageChain().message(text))
             return None
         chain = MessageChain().message(text)
         avatar = payload.get("avatar", "")
@@ -589,19 +611,30 @@ class Main(Star):
 
             img_path = await self.renderer.render_dynamic(payload)
             if img_path:
-                await event.send(MessageChain().file_image(img_path))
+                try:
+                    await event.send(MessageChain().file_image(img_path))
+                    return
+                except Exception as e:
+                    logger.warning(f"视频卡片上传失败，降级为图文: {e}")
             else:
-                msg = "渲染图片失败了 (´;ω;`)"
-                lines = [
-                    payload.title,
-                    payload.desc,
-                    f"播放 {payload.stat_view}  点赞 {payload.stat_like}  投币 {payload.stat_coin}",
-                    f"总共 {payload.online} 人正在观看",
-                ]
-                text = "\n".join(filter(None, lines))
-                await event.send(
-                    MessageChain().message(msg).message(text).url_image(info["pic"])
-                )
+                logger.warning("视频卡片生成失败，降级为图文")
+
+            lines = [
+                payload.title,
+                payload.desc,
+                f"播放 {payload.stat_view}  点赞 {payload.stat_like}  投币 {payload.stat_coin}",
+                f"总共 {payload.online} 人正在观看",
+            ]
+            text = "\n".join(filter(None, lines))
+            chain = MessageChain().message(text)
+            cover = str(info.get("pic") or "").strip()
+            if cover:
+                chain = chain.url_image(cover)
+            try:
+                await event.send(chain)
+            except Exception as e:
+                logger.warning(f"视频图文回退仍上传失败，改发纯文本: {e}")
+                await event.send(MessageChain().message(text))
 
     @command("bili_sub", alias={"订阅动态"})
     async def dynamic_sub(
@@ -789,7 +822,11 @@ class Main(Star):
             logger.error(f"渲染订阅列表失败: {e}")
             return None
 
-        if img_path and os.path.exists(img_path):
+        if (
+            img_path
+            and os.path.exists(img_path)
+            and self.renderer._validate_image(img_path)
+        ):
             return img_path
         return None
 

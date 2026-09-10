@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any, Optional
 
-from astrbot.api import FunctionTool
+from astrbot.api import FunctionTool, logger
 from astrbot.api.event import MessageEventResult
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
@@ -248,6 +248,17 @@ def _build_single_subject_result(subject: dict[str, Any]) -> MessageEventResult:
     return result
 
 
+def _build_subject_list_result(subjects: list[dict[str, Any]]) -> MessageEventResult:
+    """番剧列表无法生图时，按封面加条目信息回退。"""
+    result = MessageEventResult()
+    for index, subject in enumerate(subjects, start=1):
+        cover = _subject_cover(subject)
+        if cover:
+            result.url_image(cover)
+        result.message(f"{index}. {_format_single_subject(subject)}")
+    return result
+
+
 def _has_non_empty_tags(filter_payload: dict[str, Any]) -> bool:
     tag_values = filter_payload.get("tag")
     if not isinstance(tag_values, list):
@@ -341,13 +352,14 @@ class BgmAdvancedSubjectSearchTool(FunctionTool):
                 img_path = await self.renderer.render_subject_list(
                     subject_dicts, title=list_title
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"番剧搜索列表渲染失败，降级为图文: {e}")
                 img_path = None
 
         if img_path:
             return MessageEventResult().file_image(img_path)
 
-        return _format_subject_list("高级条目搜索结果", subjects)
+        return _build_subject_list_result(subjects)
 
 
 @dataclass
@@ -408,12 +420,11 @@ class BgmRecommendHotSubjectsTool(FunctionTool):
                 img_path = await self.renderer.render_subject_list(
                     subject_dicts, title=list_title
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"热门番剧列表渲染失败，降级为图文: {e}")
                 img_path = None
 
         if img_path:
             return MessageEventResult().file_image(img_path)
 
-        return _format_subject_list(
-            f"近期热门条目（近 {normalized_months} 个月，按热度）", subjects
-        )
+        return _build_subject_list_result(subjects)

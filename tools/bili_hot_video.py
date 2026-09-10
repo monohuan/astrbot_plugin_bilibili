@@ -2,7 +2,7 @@ import html
 import re
 from typing import Any, Optional
 
-from astrbot.api import FunctionTool
+from astrbot.api import FunctionTool, logger
 from astrbot.api.event import MessageEventResult
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
@@ -284,16 +284,24 @@ class BiliSearchHotVideosTool(FunctionTool):
                 img_path = await self.renderer.render_video_list(
                     videos, title=list_title
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(f"视频列表渲染失败，降级为图文: {e}")
                 img_path = None
 
         if img_path:
             return MessageEventResult().file_image(img_path)
 
-        lines = [
-            f"{i}. 《{v['title']}》\nUP主：{v['author']}  时长：{v['duration']}"
-            + (f"  发布：{v['pubdate']}" if v["pubdate"] else "")
-            + f"\n{v['url']}"
-            for i, v in enumerate(videos, start=1)
-        ]
-        return "\n".join(lines)
+        result = MessageEventResult()
+        for i, v in enumerate(videos, start=1):
+            if v["cover"]:
+                result.url_image(v["cover"])
+            text = (
+                f"{i}. 《{v['title']}》\n"
+                f"UP主：{v['author']} | 时长：{v['duration']}\n"
+                f"播放：{v['play']} | 弹幕：{v['danmaku']}"
+            )
+            if v["pubdate"]:
+                text += f"\n发布时间：{v['pubdate']}"
+            text += f"\n链接：{v['url']}"
+            result.message(text)
+        return result

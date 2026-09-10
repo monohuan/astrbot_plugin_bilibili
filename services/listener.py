@@ -777,10 +777,36 @@ class DynamicListener:
                 )
                 logger.info(f"动态推送完成(图片): sub_user={sub_user} dyn_id={dyn_id}")
             except Exception as e:
-                logger.error(
-                    f"动态推送失败（已缓存并忽略）: sub_user={sub_user} "
+                logger.warning(
+                    f"动态图片上传失败，降级为图文: sub_user={sub_user} "
                     f"dyn_id={dyn_id} error={e}"
                 )
+                if self.plain_push_template:
+                    fallback = self._compose_template_push(payload, render_fail=True)
+                else:
+                    fallback = self._compose_plain_push(payload, render_fail=True)
+                self._cache_render(cache_key, fallback, send_node_flag)
+                fallback_to_send = self._add_at_components(
+                    list(fallback), sub_data, permit_atall=permit_atall
+                )
+                try:
+                    await self._send_dynamic(
+                        sub_user,
+                        fallback_to_send,
+                        send_node=send_node_flag,
+                        category="dynamic",
+                        dyn_id=dyn_id,
+                        summary_payload=payload,
+                    )
+                    logger.info(
+                        f"动态推送完成(上传失败后降级图文): "
+                        f"sub_user={sub_user} dyn_id={dyn_id}"
+                    )
+                except Exception as fallback_error:
+                    logger.error(
+                        f"动态降级图文仍发送失败（已忽略）: sub_user={sub_user} "
+                        f"dyn_id={dyn_id} error={fallback_error}"
+                    )
             else:
                 await self._maybe_send_original_images(
                     sub_user, payload, dyn_id, sub_data
@@ -959,8 +985,13 @@ class DynamicListener:
                 image_chain = self._add_at_components(
                     image_chain, sub_data, is_live=True, permit_atall=permit_atall
                 )
-            await self._send_dynamic(sub_user, image_chain, category="live")
-            return
+            try:
+                await self._send_dynamic(sub_user, image_chain, category="live")
+                return
+            except Exception as e:
+                logger.warning(
+                    f"直播卡片上传失败，降级为图文: sub_user={sub_user} error={e}"
+                )
         ls = self._compose_plain_push(payload, render_fail=True, category="live")
         if not is_offline:
             ls = self._add_at_components(
